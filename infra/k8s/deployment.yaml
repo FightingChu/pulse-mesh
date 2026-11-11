@@ -2,7 +2,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata: {name: pulse-cloud}
 spec:
-  replicas: 2
+  replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: pulse-cloud}}
   template:
     metadata: {labels: {app: pulse-cloud}}

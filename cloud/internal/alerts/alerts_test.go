@@ -72,6 +72,9 @@ func TestAckHidesFromDefaultList(t *testing.T) {
 	if !engine.Ack(alert.ID) {
 		t.Fatal("ack should succeed")
 	}
+	if !engine.Ack(alert.ID) {
+		t.Fatal("repeated ack should be idempotent")
+	}
 	if got := len(engine.List("", false)); got != 0 {
 		t.Fatalf("default list len = %d, want 0", got)
 	}

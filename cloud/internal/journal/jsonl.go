@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 )
 
 const scanChunk = 4096
+
+var appendLocks sync.Map
 
 type SyncFile interface {
 	Stat() (os.FileInfo, error)
@@ -65,6 +68,12 @@ func RepairIncompleteTail(file *os.File) (bool, error) {
 }
 
 func AppendSynced(file SyncFile, record []byte) error {
+	if regularFile, ok := file.(*os.File); ok {
+		lockValue, _ := appendLocks.LoadOrStore(regularFile.Name(), &sync.Mutex{})
+		lock := lockValue.(*sync.Mutex)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 	info, err := file.Stat()
 	if err != nil {
 		return err

@@ -50,6 +50,8 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - 网关事件带 event_id，样本和诊断以 device_id + event_id 幂等；诊断重试返回已有结果，不重复调用 AI 或生成告警。
 - 幂等记录跟随各自内存保留窗口，云端重启后不持久；需要跨重启保证时应替换为持久化存储。
 - 设置 PULSE_DATA_DIR 后，云端将样本、诊断、告警分别写入 samples.jsonl、diagnoses.jsonl、alerts.jsonl；启动时恢复记录、event_id 索引、告警 ack 与去重窗口；Docker Compose 和 Helm 默认挂载持久卷。
+- JSONL 后端是单副本写入模式；Kubernetes 使用 Recreate 和一个 RWO 持久卷，不能直接扩为多副本。
+- 启动时会修复断电留下的不完整尾行；运行中写入或 fsync 失败会回滚该条记录，避免污染后续日志。
 - 未设置 PULSE_DATA_DIR 时使用纯内存模式，适合本地快速开发。
 - AI 连续 3 次发生网络、超时或 5xx 错误后熔断 15 秒，冷却后仅允许一个探测请求；AI 的 4xx 输入错误不计入熔断。
 - 云端同时最多运行 4 个频谱诊断请求，超额返回 429 和 Retry-After，避免波形计算与等待 AI 无界堆积。
