@@ -15,10 +15,12 @@ import (
 
 const maxJSONBody = 128 * 1024
 const maxWaveformValues = 1024
+const maxConcurrentDiagnoses = 4
 
 func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagnoses *diagnose.Store) http.Handler {
 	metrics := NewMetrics()
 	mux := http.NewServeMux()
+	diagnoseSlots := make(chan struct{}, maxConcurrentDiagnoses)
 	mux.Handle("/metrics", metrics.Handler())
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -149,9 +151,22 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		if req.RotationHz <= 0 {
 			req.RotationHz = 25
 		}
+		select {
+		case diagnoseSlots <- struct{}{}:
+			defer func() { <-diagnoseSlots }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "diagnosis capacity reached"})
+			return
+		}
 
 		result, err := ai.Diagnose(r.Context(), req)
 		if err != nil {
+			if errors.Is(err, diagnose.ErrCircuitOpen) {
+				w.Header().Set("Retry-After", "15")
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+				return
+			}
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}

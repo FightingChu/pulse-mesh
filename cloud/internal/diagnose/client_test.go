@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"pulse-mesh/cloud/internal/diagnose"
 )
@@ -67,6 +69,66 @@ func TestDiagnosePropagatesAIError(t *testing.T) {
 	}
 	if err.Error() != "ai service: values length must be a power of two" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCircuitOpensAndAllowsSingleRecoveryProbe(t *testing.T) {
+	var calls atomic.Int32
+	var healthy atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if !healthy.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(diagnose.Result{DeviceID: "motor-01", Fault: "normal"})
+	}))
+	defer server.Close()
+
+	client := diagnose.NewClientWithBreaker(server.URL, time.Second, 2, 40*time.Millisecond)
+	request := diagnose.Request{DeviceID: "motor-01", Values: []float64{1, 2, 3, 4}}
+	for i := 0; i < 2; i++ {
+		if _, err := client.Diagnose(context.Background(), request); err == nil {
+			t.Fatal("expected AI unavailable error")
+		}
+	}
+	if _, err := client.Diagnose(context.Background(), request); err != diagnose.ErrCircuitOpen {
+		t.Fatalf("third error = %v, want circuit open", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("AI calls while open = %d, want 2", got)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	healthy.Store(true)
+	if _, err := client.Diagnose(context.Background(), request); err != nil {
+		t.Fatalf("recovery probe: %v", err)
+	}
+	if _, err := client.Diagnose(context.Background(), request); err != nil {
+		t.Fatalf("request after recovery: %v", err)
+	}
+	if got := calls.Load(); got != 4 {
+		t.Fatalf("total AI calls = %d, want 4", got)
+	}
+}
+
+func TestClientDoesNotTripCircuitOnAIValidationError(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid waveform"}`))
+	}))
+	defer server.Close()
+	client := diagnose.NewClientWithBreaker(server.URL, time.Second, 1, time.Second)
+	request := diagnose.Request{DeviceID: "motor-01", Values: []float64{1}}
+	for i := 0; i < 2; i++ {
+		if _, err := client.Diagnose(context.Background(), request); err == nil {
+			t.Fatal("expected validation error")
+		}
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("validation errors opened the circuit, calls=%d", got)
 	}
 }
 

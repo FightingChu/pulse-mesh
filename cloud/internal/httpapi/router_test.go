@@ -419,3 +419,59 @@ func TestDiagnoseReturnsBadGatewayWhenAIDown(t *testing.T) {
 		t.Fatalf("status = %d, want 502", resp.StatusCode)
 	}
 }
+
+func TestDiagnoseConcurrencyLimit(t *testing.T) {
+	const concurrencyLimit = 4
+	started := make(chan struct{}, concurrencyLimit)
+	release := make(chan struct{})
+	ai := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-release
+		_ = json.NewEncoder(w).Encode(diagnose.Result{DeviceID: "motor-01", Fault: "normal"})
+	}))
+	defer ai.Close()
+	srv := httptest.NewServer(httpapi.New(
+		ingest.NewStore(),
+		alerts.New(time.Minute),
+		diagnose.NewClient(ai.URL),
+		diagnose.NewStore(10),
+	))
+	defer srv.Close()
+
+	values := make([]float64, 1024)
+	payload, _ := json.Marshal(diagnose.Request{DeviceID: "motor-01", Values: values})
+	results := make(chan int, concurrencyLimit)
+	for i := 0; i < concurrencyLimit; i++ {
+		go func() {
+			resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(payload)))
+			if err != nil {
+				results <- 0
+				return
+			}
+			resp.Body.Close()
+			results <- resp.StatusCode
+		}()
+	}
+	for i := 0; i < concurrencyLimit; i++ {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for AI calls")
+		}
+	}
+
+	resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatalf("fifth request: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("fifth status = %d, want 429", resp.StatusCode)
+	}
+	close(release)
+	for i := 0; i < concurrencyLimit; i++ {
+		if status := <-results; status != http.StatusOK {
+			t.Fatalf("in-flight status = %d, want 200", status)
+		}
+	}
+}
