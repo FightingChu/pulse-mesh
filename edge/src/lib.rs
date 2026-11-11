@@ -12,6 +12,83 @@ pub const DIAGNOSE_PATH: &str = "/api/v1/diagnose";
 const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 128 * 1024;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EdgeConfig {
+    pub cloud_addr: String,
+    pub cache_path: String,
+    pub device_id: String,
+    pub sample_count: usize,
+    pub sample_interval: Duration,
+    pub sample_rate_hz: f64,
+    pub rotation_hz: f64,
+    pub bearing_amplitude: f64,
+}
+
+impl EdgeConfig {
+    pub fn from_env() -> Result<Self, String> {
+        Self::from_lookup(|key| std::env::var(key).ok())
+    }
+
+    pub fn from_lookup(mut get: impl FnMut(&str) -> Option<String>) -> Result<Self, String> {
+        let cloud_addr = get("PULSE_CLOUD_ADDR").unwrap_or_else(|| DEFAULT_ADDR.to_string());
+        let cache_path = get("PULSE_CACHE_PATH").unwrap_or_else(|| DEFAULT_CACHE.to_string());
+        let device_id = get("PULSE_EDGE_DEVICE_ID").unwrap_or_else(|| "motor-01".to_string());
+        if device_id.is_empty()
+            || device_id.len() > 64
+            || !device_id.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
+            })
+        {
+            return Err("PULSE_EDGE_DEVICE_ID must be 1-64 ASCII letters, digits, dot, dash or underscore".to_string());
+        }
+
+        let sample_count = parse_env(&mut get, "PULSE_SAMPLE_COUNT", 10usize)?;
+        if !(1..=100).contains(&sample_count) {
+            return Err("PULSE_SAMPLE_COUNT must be between 1 and 100".to_string());
+        }
+        let sample_interval_ms = parse_env(&mut get, "PULSE_SAMPLE_INTERVAL_MS", 200u64)?;
+        if sample_interval_ms > 60_000 {
+            return Err("PULSE_SAMPLE_INTERVAL_MS must not exceed 60000".to_string());
+        }
+        let sample_rate_hz = parse_env(&mut get, "PULSE_SAMPLE_RATE_HZ", 1000.0f64)?;
+        let rotation_hz = parse_env(&mut get, "PULSE_ROTATION_HZ", 25.0f64)?;
+        let bearing_amplitude = parse_env(&mut get, "PULSE_BEARING_AMPLITUDE", 0.6f64)?;
+        if !sample_rate_hz.is_finite()
+            || !rotation_hz.is_finite()
+            || !bearing_amplitude.is_finite()
+            || sample_rate_hz <= 0.0
+            || sample_rate_hz < 240.0
+            || rotation_hz < 0.0
+            || sample_rate_hz < 2.0 * rotation_hz
+            || bearing_amplitude < 0.0
+        {
+            return Err("sampling rate must be at least 240 Hz; frequencies and amplitude must be finite and non-negative".to_string());
+        }
+
+        Ok(Self {
+            cloud_addr,
+            cache_path,
+            device_id,
+            sample_count,
+            sample_interval: Duration::from_millis(sample_interval_ms),
+            sample_rate_hz,
+            rotation_hz,
+            bearing_amplitude,
+        })
+    }
+}
+
+fn parse_env<T: std::str::FromStr>(
+    get: &mut impl FnMut(&str) -> Option<String>,
+    key: &str,
+    default: T,
+) -> Result<T, String> {
+    match get(key) {
+        Some(raw) => raw.parse().map_err(|_| format!("invalid {key}: {raw}")),
+        None => Ok(default),
+    }
+}
+
 pub struct Sample<'a> {
     pub event_id: &'a str,
     pub device_id: &'a str,
@@ -245,6 +322,57 @@ mod tests {
             body,
             "{\"event_id\":\"boot-123-sample-0\",\"device_id\":\"motor-01\",\"metric\":\"vibration_rms\",\"value\":1.23,\"level\":\"normal\",\"temp_c\":55.5}"
         );
+    }
+
+    #[test]
+    fn edge_config_has_safe_defaults() {
+        let config = EdgeConfig::from_lookup(|_| None).unwrap();
+        assert_eq!(config.cloud_addr, DEFAULT_ADDR);
+        assert_eq!(config.cache_path, DEFAULT_CACHE);
+        assert_eq!(config.device_id, "motor-01");
+        assert_eq!(config.sample_count, 10);
+        assert_eq!(config.sample_interval, Duration::from_millis(200));
+        assert_eq!(config.sample_rate_hz, 1000.0);
+    }
+
+    #[test]
+    fn edge_config_accepts_supported_overrides() {
+        let config = EdgeConfig::from_lookup(|key| match key {
+            "PULSE_CLOUD_ADDR" => Some("10.0.0.8:8080".to_string()),
+            "PULSE_EDGE_DEVICE_ID" => Some("pump_02.a".to_string()),
+            "PULSE_SAMPLE_COUNT" => Some("20".to_string()),
+            "PULSE_SAMPLE_INTERVAL_MS" => Some("50".to_string()),
+            "PULSE_SAMPLE_RATE_HZ" => Some("2048".to_string()),
+            "PULSE_ROTATION_HZ" => Some("30".to_string()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(config.cloud_addr, "10.0.0.8:8080");
+        assert_eq!(config.device_id, "pump_02.a");
+        assert_eq!(config.sample_count, 20);
+        assert_eq!(config.sample_interval, Duration::from_millis(50));
+        assert_eq!(config.sample_rate_hz, 2048.0);
+    }
+
+    #[test]
+    fn edge_config_rejects_out_of_range_values() {
+        for (key, value) in [
+            ("PULSE_EDGE_DEVICE_ID", "bad device"),
+            ("PULSE_SAMPLE_COUNT", "101"),
+            ("PULSE_SAMPLE_INTERVAL_MS", "60001"),
+            ("PULSE_SAMPLE_RATE_HZ", "100"),
+            ("PULSE_ROTATION_HZ", "600"),
+            ("PULSE_BEARING_AMPLITUDE", "-1"),
+        ] {
+            let result = EdgeConfig::from_lookup(|candidate| {
+                if candidate == key {
+                    Some(value.to_string())
+                } else {
+                    None
+                }
+            });
+            assert!(result.is_err(), "{key}={value} should be rejected");
+        }
     }
 
     #[test]
