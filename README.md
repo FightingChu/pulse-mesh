@@ -4,6 +4,8 @@
 
 架构：ESP32 节点(C++) -> Rust 网关 -> Go 云端(K8s) -> Python AI -> Flutter App
 
+仓库：[GitHub](https://github.com/FightingChu/pulse-mesh) | [Gitee](https://gitee.com/cwyay/pulse-mesh)
+
 ## 目录
 
 - `firmware/` C++17，RMS 计算 + 三级判级，输出 JSON 行
