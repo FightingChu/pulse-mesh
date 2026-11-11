@@ -1,0 +1,10 @@
+services:
+  cloud:
+    build: ../cloud
+    ports: ["8080:8080"]
+  ai:
+    image: python:3.14-slim
+    command: python app/main.py
+    working_dir: /app
+    volumes: ["../ai:/app"]
+    ports: ["8000:8000"]

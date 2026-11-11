@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+project(pulse_firmware CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_executable(pulse_firmware src/main.cpp src/sensor.cpp)
+target_include_directories(pulse_firmware PRIVATE include)
