@@ -47,6 +47,8 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - Prometheus 路由标签限制为已知路由，其他路径合并为 unmatched，避免路径注入造成高基数。
 - Rust outbox 限制 64 MiB、单条 128 KiB；追加后 sync_data，重放保留原始路由，只收到 2xx 后才确认移除。
 - Rust HTTP 客户端设置 5s 读写超时，只接受 2xx 作为成功；未知路由在连接前拒绝。
+- 网关事件带 event_id，样本和诊断以 device_id + event_id 幂等；诊断重试返回已有结果，不重复调用 AI 或生成告警。
+- 幂等记录跟随各自内存保留窗口，云端重启后不持久；需要跨重启保证时应替换为持久化存储。
 
 # 判据
 

@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ fn level_of(value: f64) -> &'static str {
 fn main() {
     let addr = std::env::var("PULSE_CLOUD_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     let cache = Path::new(DEFAULT_CACHE);
+    let session_id = session_id();
 
     let replayed = flush_cache(&addr, cache);
     if replayed > 0 {
@@ -28,7 +30,9 @@ fn main() {
 
     for tick in 0..10 {
         let value = if tick == 7 { 4.8 } else { 1.2 };
+        let event_id = format!("{session_id}-sample-{tick}");
         let body = Sample {
+            event_id: &event_id,
             device_id: "motor-01",
             metric: "vibration_rms",
             value,
@@ -46,11 +50,20 @@ fn main() {
     }
 
     let values = waveform(25.0, 0.6, 1024, 1000.0);
-    let body = diagnose_body("motor-01", &values, 1000.0, 25.0);
+    let diagnosis_event_id = format!("{session_id}-spectrum-0");
+    let body = diagnose_body(&diagnosis_event_id, "motor-01", &values, 1000.0, 25.0);
     if forward_to(&addr, DIAGNOSE_PATH, &body) {
         println!("diagnose sent: {} points", values.len());
     } else {
         append_cache_to(cache, DIAGNOSE_PATH, &body).expect("cache offline diagnosis");
         println!("diagnose failed: cloud unavailable");
     }
+}
+
+fn session_id() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    format!("{}-{}-{}", std::process::id(), std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default(), COUNTER.fetch_add(1, Ordering::Relaxed))
 }

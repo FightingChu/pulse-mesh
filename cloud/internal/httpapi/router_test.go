@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,14 +17,22 @@ import (
 )
 
 func newTestServer(t *testing.T) *httptest.Server {
+	return newTestServerWithAI(t, nil)
+}
+
+func newTestServerWithAI(t *testing.T, calls *atomic.Int32) *httptest.Server {
 	t.Helper()
 	ai := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls != nil {
+			calls.Add(1)
+		}
 		var req diagnose.Request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		writeJSON(w, diagnose.Result{
+			EventID:    req.EventID,
 			DeviceID:   req.DeviceID,
 			DominantHz: 120,
 			HighBand:   0.9,
@@ -95,6 +104,33 @@ func TestPostThenList(t *testing.T) {
 	}
 	if samples[0].DeviceID != "motor-01" || samples[0].Value != 4.8 {
 		t.Fatalf("unexpected sample: %+v", samples[0])
+	}
+}
+
+func TestDuplicateSampleEventIsNotStoredTwice(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	payload := `{"event_id":"boot-1-sample-0","device_id":"motor-01","metric":"vibration_rms","value":4.8,"level":"critical"}`
+	post := func() map[string]any {
+		resp, err := http.Post(srv.URL+"/api/v1/samples", "application/json", strings.NewReader(payload))
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer resp.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body
+	}
+	first := post()
+	second := post()
+	if first["duplicate"] == true || second["duplicate"] != true {
+		t.Fatalf("unexpected idempotency responses: first=%v second=%v", first, second)
+	}
+	if first["stored"] != float64(1) || second["stored"] != float64(1) {
+		t.Fatalf("sample count changed on retry: first=%v second=%v", first["stored"], second["stored"])
 	}
 }
 
@@ -237,11 +273,13 @@ func TestCriticalSampleCreatesAlertAndAck(t *testing.T) {
 }
 
 func TestDiagnoseStoresResultAndRaisesAlert(t *testing.T) {
-	srv := newTestServer(t)
+	var aiCalls atomic.Int32
+	srv := newTestServerWithAI(t, &aiCalls)
 	defer srv.Close()
 
 	values := make([]float64, 1024)
 	payload, err := json.Marshal(diagnose.Request{
+		EventID:      "boot-1-spectrum-0",
 		DeviceID:     "motor-01",
 		Values:       values,
 		SampleRateHz: 1000,
@@ -288,6 +326,26 @@ func TestDiagnoseStoresResultAndRaisesAlert(t *testing.T) {
 	}
 	if len(stored) != 1 || stored[0].Fault != "bearing_wear" {
 		t.Fatalf("unexpected stored diagnoses: %+v", stored)
+	}
+
+	resp, err = http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatalf("retry diagnose: %v", err)
+	}
+	defer resp.Body.Close()
+	var duplicate struct {
+		Duplicate bool            `json:"duplicate"`
+		Diagnosis diagnose.Result `json:"diagnosis"`
+		Alert     *alerts.Alert   `json:"alert"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&duplicate); err != nil {
+		t.Fatalf("decode retry: %v", err)
+	}
+	if !duplicate.Duplicate || duplicate.Diagnosis.EventID != "boot-1-spectrum-0" || duplicate.Alert != nil {
+		t.Fatalf("unexpected duplicate response: %+v", duplicate)
+	}
+	if got := aiCalls.Load(); got != 1 {
+		t.Fatalf("AI calls = %d, want 1 after retry", got)
 	}
 }
 

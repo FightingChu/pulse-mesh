@@ -41,7 +41,15 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample values or level"})
 				return
 			}
-			store.Add(s)
+			added := store.Add(s)
+			if !added {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"stored":    store.Count(),
+					"duplicate": true,
+					"alert":     nil,
+				})
+				return
+			}
 			created := engine.Evaluate(s)
 			writeJSON(w, http.StatusCreated, map[string]any{
 				"stored": store.Count(),
@@ -98,6 +106,16 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "device_id and values are required"})
 			return
 		}
+		if req.EventID != "" {
+			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"diagnosis": previous,
+					"alert":     nil,
+					"duplicate": true,
+				})
+				return
+			}
+		}
 		if len(req.Values) != maxWaveformValues {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "values must contain exactly 1024 samples"})
 			return
@@ -124,7 +142,16 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
-		diagnoses.Add(result)
+		if !diagnoses.Add(result) {
+			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"diagnosis": previous,
+					"alert":     nil,
+					"duplicate": true,
+				})
+				return
+			}
+		}
 		alert := engine.EvaluateFault(result.DeviceID, result.Fault)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"diagnosis": result,

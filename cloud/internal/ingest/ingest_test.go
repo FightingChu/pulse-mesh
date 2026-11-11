@@ -67,3 +67,22 @@ func TestStoreIsBounded(t *testing.T) {
 		t.Fatalf("expected last value retained, got %+v", got)
 	}
 }
+
+func TestStoreDeduplicatesEventIDPerDevice(t *testing.T) {
+	store := ingest.NewStore()
+	first := ingest.Sample{EventID: "boot-1-0", DeviceID: "motor-01", Metric: "vibration_rms", Value: 1}
+	if !store.Add(first) {
+		t.Fatal("first event should be stored")
+	}
+	if store.Add(first) {
+		t.Fatal("retry should be deduplicated")
+	}
+	secondDevice := first
+	secondDevice.DeviceID = "pump-02"
+	if !store.Add(secondDevice) {
+		t.Fatal("same event id from another device should be stored")
+	}
+	if got := store.Count(); got != 2 {
+		t.Fatalf("count = %d, want 2", got)
+	}
+}

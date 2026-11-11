@@ -12,6 +12,7 @@ import (
 )
 
 type sample struct {
+	EventID  string  `json:"event_id"`
 	DeviceID string  `json:"device_id"`
 	Metric   string  `json:"metric"`
 	Value    float64 `json:"value"`
@@ -52,6 +53,7 @@ func reading(tick int) sample {
 	}
 	return sample{
 		DeviceID: "motor-01",
+		EventID:  fmt.Sprintf("sim-%d-%d", time.Now().UnixNano(), tick),
 		Metric:   "vibration_rms",
 		Value:    math.Round(rms(window)*100) / 100,
 		Level:    levelName(rms(window)),

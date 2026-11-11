@@ -12,6 +12,7 @@ import (
 )
 
 type Request struct {
+	EventID      string    `json:"event_id,omitempty"`
 	DeviceID     string    `json:"device_id"`
 	Values       []float64 `json:"values"`
 	SampleRateHz float64   `json:"sample_rate_hz"`
@@ -19,6 +20,7 @@ type Request struct {
 }
 
 type Result struct {
+	EventID       string    `json:"event_id,omitempty"`
 	DeviceID      string    `json:"device_id"`
 	DominantHz    float64   `json:"dominant_hz"`
 	PeakAmplitude float64   `json:"peak_amplitude"`
@@ -79,6 +81,9 @@ func (c *Client) Diagnose(ctx context.Context, req Request) (Result, error) {
 	}
 	if result.DeviceID == "" {
 		result.DeviceID = req.DeviceID
+	}
+	if result.EventID == "" {
+		result.EventID = req.EventID
 	}
 	result.DiagnosedAt = time.Now().UTC()
 	return result, nil

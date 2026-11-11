@@ -22,7 +22,11 @@ func TestDiagnoseSuccess(t *testing.T) {
 		if req.DeviceID != "motor-01" || len(req.Values) != 8 {
 			t.Errorf("unexpected request: %+v", req)
 		}
+		if req.EventID != "boot-1-spectrum-0" {
+			t.Errorf("event_id = %q", req.EventID)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
+			"event_id":    req.EventID,
 			"device_id":   req.DeviceID,
 			"dominant_hz": 25.0,
 			"high_band":   0.1,
@@ -33,13 +37,14 @@ func TestDiagnoseSuccess(t *testing.T) {
 
 	client := diagnose.NewClient(server.URL)
 	result, err := client.Diagnose(context.Background(), diagnose.Request{
+		EventID:  "boot-1-spectrum-0",
 		DeviceID: "motor-01",
 		Values:   []float64{1, 2, 3, 4, 5, 6, 7, 8},
 	})
 	if err != nil {
 		t.Fatalf("diagnose: %v", err)
 	}
-	if result.Fault != "imbalance" || result.DeviceID != "motor-01" {
+	if result.Fault != "imbalance" || result.DeviceID != "motor-01" || result.EventID != "boot-1-spectrum-0" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if result.DiagnosedAt.IsZero() {
@@ -77,5 +82,23 @@ func TestStoreIsBoundedAndNewestFirst(t *testing.T) {
 	}
 	if got := len(store.List("pump-02", 10)); got != 0 {
 		t.Fatalf("filtered len = %d, want 0", got)
+	}
+}
+
+func TestStoreDeduplicatesAndGetsEvent(t *testing.T) {
+	store := diagnose.NewStore(10)
+	result := diagnose.Result{DeviceID: "motor-01", EventID: "boot-1-spectrum-0", Fault: "bearing_wear"}
+	if !store.Add(result) {
+		t.Fatal("first result should be stored")
+	}
+	if store.Add(result) {
+		t.Fatal("retry should be deduplicated")
+	}
+	got, ok := store.Get("motor-01", "boot-1-spectrum-0")
+	if !ok || got.Fault != "bearing_wear" {
+		t.Fatalf("get = %+v, %v", got, ok)
+	}
+	if store.Add(diagnose.Result{DeviceID: "pump-02", EventID: "boot-1-spectrum-0"}) == false {
+		t.Fatal("event ID should be scoped per device")
 	}
 }

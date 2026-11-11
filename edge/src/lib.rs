@@ -12,6 +12,7 @@ const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 128 * 1024;
 
 pub struct Sample<'a> {
+    pub event_id: &'a str,
     pub device_id: &'a str,
     pub metric: &'a str,
     pub value: f64,
@@ -22,8 +23,8 @@ pub struct Sample<'a> {
 impl Sample<'_> {
     pub fn to_json(&self) -> String {
         format!(
-            "{{\"device_id\":\"{}\",\"metric\":\"{}\",\"value\":{:.2},\"level\":\"{}\",\"temp_c\":{:.1}}}",
-            self.device_id, self.metric, self.value, self.level, self.temp_c
+            "{{\"event_id\":\"{}\",\"device_id\":\"{}\",\"metric\":\"{}\",\"value\":{:.2},\"level\":\"{}\",\"temp_c\":{:.1}}}",
+            self.event_id, self.device_id, self.metric, self.value, self.level, self.temp_c
         )
     }
 }
@@ -105,6 +106,7 @@ pub fn waveform(rotation_hz: f64, bearing_amplitude: f64, n: usize, sample_rate_
 }
 
 pub fn diagnose_body(
+    event_id: &str,
     device_id: &str,
     values: &[f64],
     sample_rate_hz: f64,
@@ -115,7 +117,8 @@ pub fn diagnose_body(
     }
     let encoded: Vec<String> = values.iter().map(|v| format!("{:.4}", v)).collect();
     format!(
-        "{{\"device_id\":\"{}\",\"values\":[{}],\"sample_rate_hz\":{},\"rotation_hz\":{}}}",
+        "{{\"event_id\":\"{}\",\"device_id\":\"{}\",\"values\":[{}],\"sample_rate_hz\":{},\"rotation_hz\":{}}}",
+        event_id,
         device_id,
         encoded.join(","),
         sample_rate_hz,
@@ -199,6 +202,7 @@ mod tests {
     #[test]
     fn body_keeps_edge_verdict() {
         let body = Sample {
+            event_id: "boot-123-sample-0",
             device_id: "motor-01",
             metric: "vibration_rms",
             value: 1.234,
@@ -208,7 +212,7 @@ mod tests {
         .to_json();
         assert_eq!(
             body,
-            "{\"device_id\":\"motor-01\",\"metric\":\"vibration_rms\",\"value\":1.23,\"level\":\"normal\",\"temp_c\":55.5}"
+            "{\"event_id\":\"boot-123-sample-0\",\"device_id\":\"motor-01\",\"metric\":\"vibration_rms\",\"value\":1.23,\"level\":\"normal\",\"temp_c\":55.5}"
         );
     }
 
@@ -323,8 +327,8 @@ mod tests {
 
     #[test]
     fn diagnose_body_encodes_all_values() {
-        let body = diagnose_body("motor-01", &[0.0, 0.5, -0.5], 1000.0, 25.0);
-        assert!(body.starts_with("{\"device_id\":\"motor-01\",\"values\":["));
+        let body = diagnose_body("boot-123-spectrum-0", "motor-01", &[0.0, 0.5, -0.5], 1000.0, 25.0);
+        assert!(body.starts_with("{\"event_id\":\"boot-123-spectrum-0\",\"device_id\":\"motor-01\",\"values\":["));
         assert!(body.contains("0.0000,0.5000,-0.5000"));
         assert!(body.ends_with("],\"sample_rate_hz\":1000,\"rotation_hz\":25}"));
     }

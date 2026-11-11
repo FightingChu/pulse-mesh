@@ -38,7 +38,7 @@ def assess(device_id, metric, values):
     z = zscore(last, baseline(values))
     return {'device_id': device_id, 'metric': metric, 'last': last, 'rms': rms(values), 'z': round(z, 3), 'level': level_of(z)}
 
-def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0):
+def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0, event_id=''):
     if len(values) != MAX_WAVEFORM_VALUES:
         raise ValueError('values must contain exactly 1024 samples')
     if not math.isfinite(sample_rate_hz) or not math.isfinite(rotation_hz):
@@ -49,6 +49,7 @@ def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0):
         raise ValueError('waveform values must be finite numbers')
     result = spectrum.diagnose(values, sample_rate_hz, rotation_hz)
     result['device_id'] = device_id
+    result['event_id'] = event_id
     return result
 
 class H(BaseHTTPRequestHandler):
@@ -79,6 +80,7 @@ class H(BaseHTTPRequestHandler):
                     body.get('values', []),
                     float(body.get('sample_rate_hz', 1000.0)),
                     float(body.get('rotation_hz', 25.0)),
+                    body.get('event_id', ''),
                 )
                 self._send(result)
                 return
