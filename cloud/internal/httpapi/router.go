@@ -17,6 +17,7 @@ import (
 const maxJSONBody = 128 * 1024
 const maxWaveformValues = 1024
 const maxConcurrentDiagnoses = 4
+const maxSampleBatch = 100
 
 func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagnoses *diagnose.Store) http.Handler {
 	metrics := NewMetrics()
@@ -61,35 +62,21 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				writeDecodeError(w, err)
 				return
 			}
-			if s.DeviceID == "" || s.Metric == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "device_id and metric are required"})
+			if err := validateSample(s); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
-			if !finite(s.Value) || !finite(s.TempC) || (s.Level != "" && s.Level != "normal" && s.Level != "warning" && s.Level != "critical") {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample values or level"})
-				return
-			}
-			added, err := store.Add(s)
+			added, created, err := processSample(store, engine, s)
 			if err != nil {
 				writeStorageError(w, err, "sample persistence failed")
 				return
 			}
 			if !added {
-				created, err := engine.EvaluateWithError(s)
-				if err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
-					return
-				}
 				writeJSON(w, http.StatusOK, map[string]any{
 					"stored":    store.Count(),
 					"duplicate": true,
 					"alert":     created,
 				})
-				return
-			}
-			created, err := engine.EvaluateWithError(s)
-			if err != nil {
-				writeStorageError(w, err, "alert persistence failed")
 				return
 			}
 			writeJSON(w, http.StatusCreated, map[string]any{
@@ -102,6 +89,57 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			w.Header().Set("Allow", "GET, POST")
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		}
+	})
+
+	mux.HandleFunc("/api/v1/samples/batch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		var samples []ingest.Sample
+		if err := decodeJSON(w, r, &samples); err != nil {
+			writeDecodeError(w, err)
+			return
+		}
+		if len(samples) == 0 || len(samples) > maxSampleBatch {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "batch must contain between 1 and 100 samples"})
+			return
+		}
+		for index, sample := range samples {
+			if err := validateSample(sample); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "index": index})
+				return
+			}
+		}
+		stored := 0
+		duplicates := 0
+		createdAlerts := make([]alerts.Alert, 0)
+		for _, sample := range samples {
+			added, created, err := processSample(store, engine, sample)
+			if err != nil {
+				writeStorageError(w, err, "batch persistence failed")
+				return
+			}
+			if added {
+				stored++
+			} else {
+				duplicates++
+			}
+			if created != nil {
+				createdAlerts = append(createdAlerts, *created)
+			}
+		}
+		status := http.StatusCreated
+		if stored == 0 {
+			status = http.StatusOK
+		}
+		writeJSON(w, status, map[string]any{
+			"received":   len(samples),
+			"stored":     stored,
+			"duplicates": duplicates,
+			"alerts":     createdAlerts,
+		})
 	})
 
 	mux.HandleFunc("/api/v1/alerts", func(w http.ResponseWriter, r *http.Request) {
@@ -290,4 +328,26 @@ func writeDecodeError(w http.ResponseWriter, err error) {
 
 func finite(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func validateSample(s ingest.Sample) error {
+	if s.DeviceID == "" || s.Metric == "" {
+		return errors.New("device_id and metric are required")
+	}
+	if !finite(s.Value) || !finite(s.TempC) || (s.Level != "" && s.Level != "normal" && s.Level != "warning" && s.Level != "critical") {
+		return errors.New("invalid sample values or level")
+	}
+	return nil
+}
+
+func processSample(store *ingest.Store, engine *alerts.Engine, sample ingest.Sample) (bool, *alerts.Alert, error) {
+	added, err := store.Add(sample)
+	if err != nil {
+		return false, nil, err
+	}
+	created, err := engine.EvaluateWithError(sample)
+	if err != nil {
+		return added, nil, err
+	}
+	return added, created, nil
 }

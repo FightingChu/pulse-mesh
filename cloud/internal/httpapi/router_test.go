@@ -152,6 +152,78 @@ func TestDuplicateSampleEventIsNotStoredTwice(t *testing.T) {
 	}
 }
 
+func TestBatchSamplesValidatesThenStoresAndDeduplicates(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	payload := `[
+		{"event_id":"batch-1","device_id":"motor-01","metric":"vibration_rms","value":1.2,"level":"normal"},
+		{"event_id":"batch-2","device_id":"motor-01","metric":"vibration_rms","value":4.8,"level":"critical"}
+	]`
+	post := func(body string) (int, map[string]any) {
+		resp, err := http.Post(srv.URL+"/api/v1/samples/batch", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("post batch: %v", err)
+		}
+		defer resp.Body.Close()
+		var result map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode batch: %v", err)
+		}
+		return resp.StatusCode, result
+	}
+	status, first := post(payload)
+	if status != http.StatusCreated || first["stored"] != float64(2) || first["duplicates"] != float64(0) {
+		t.Fatalf("first response: status=%d body=%v", status, first)
+	}
+	status, retry := post(payload)
+	if status != http.StatusOK || retry["stored"] != float64(0) || retry["duplicates"] != float64(2) {
+		t.Fatalf("retry response: status=%d body=%v", status, retry)
+	}
+	if got := len(retry["alerts"].([]any)); got != 0 {
+		t.Fatalf("retry created %d alerts", got)
+	}
+	resp, err := http.Get(srv.URL + "/api/v1/samples?device=motor-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var stored []ingest.Sample
+	if err := json.NewDecoder(resp.Body).Decode(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("stored samples = %d, want 2", len(stored))
+	}
+}
+
+func TestBatchRejectsInvalidItemBeforeWritingAny(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	payload := `[{"event_id":"batch-1","device_id":"motor-01","metric":"v","value":1},{"event_id":"batch-2","device_id":"","metric":"v","value":2}]`
+	resp, err := http.Post(srv.URL+"/api/v1/samples/batch", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	resp, err = http.Get(srv.URL + "/api/v1/samples?device=motor-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var stored []ingest.Sample
+	if err := json.NewDecoder(resp.Body).Decode(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("partial batch wrote %d samples", len(stored))
+	}
+}
+
 func TestPostRejectsMissingDevice(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()

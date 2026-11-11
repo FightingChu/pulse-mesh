@@ -52,7 +52,7 @@ func (m *Metrics) setStore(name string, records int, bytes int64, failures uint6
 
 func normalizePath(path string) string {
 	switch path {
-	case "/health", "/health/live", "/health/ready", "/metrics", "/api/v1/samples", "/api/v1/alerts", "/api/v1/diagnose", "/api/v1/diagnoses":
+	case "/health", "/health/live", "/health/ready", "/metrics", "/api/v1/samples", "/api/v1/samples/batch", "/api/v1/alerts", "/api/v1/diagnose", "/api/v1/diagnoses":
 		return path
 	}
 	if strings.HasPrefix(path, "/api/v1/alerts/") && strings.HasSuffix(path, "/ack") {

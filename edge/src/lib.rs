@@ -7,6 +7,7 @@ use std::time::Duration;
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8080";
 pub const DEFAULT_CACHE: &str = "cache.jsonl";
 pub const SAMPLE_PATH: &str = "/api/v1/samples";
+pub const BATCH_PATH: &str = "/api/v1/samples/batch";
 pub const DIAGNOSE_PATH: &str = "/api/v1/diagnose";
 const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 128 * 1024;
@@ -20,6 +21,15 @@ pub struct Sample<'a> {
     pub temp_c: f64,
 }
 
+pub struct OwnedSample {
+    pub event_id: String,
+    pub device_id: String,
+    pub metric: String,
+    pub value: f64,
+    pub level: String,
+    pub temp_c: f64,
+}
+
 impl Sample<'_> {
     pub fn to_json(&self) -> String {
         format!(
@@ -29,12 +39,26 @@ impl Sample<'_> {
     }
 }
 
+impl OwnedSample {
+    pub fn to_json(&self) -> String {
+        Sample {
+            event_id: &self.event_id,
+            device_id: &self.device_id,
+            metric: &self.metric,
+            value: self.value,
+            level: &self.level,
+            temp_c: self.temp_c,
+        }
+        .to_json()
+    }
+}
+
 pub fn forward(addr: &str, body: &str) -> bool {
     forward_to(addr, SAMPLE_PATH, body)
 }
 
 pub fn forward_to(addr: &str, path: &str, body: &str) -> bool {
-    if path != SAMPLE_PATH && path != DIAGNOSE_PATH {
+    if path != SAMPLE_PATH && path != BATCH_PATH && path != DIAGNOSE_PATH {
         return false;
     }
     let request = format!(
@@ -126,12 +150,17 @@ pub fn diagnose_body(
     )
 }
 
+pub fn batch_body(samples: &[OwnedSample]) -> String {
+    let encoded: Vec<String> = samples.iter().map(OwnedSample::to_json).collect();
+    format!("[{}]", encoded.join(","))
+}
+
 pub fn append_cache(path: &Path, body: &str) -> io::Result<()> {
     append_cache_to(path, SAMPLE_PATH, body)
 }
 
 pub fn append_cache_to(path: &Path, route: &str, body: &str) -> io::Result<()> {
-    if route != SAMPLE_PATH && route != DIAGNOSE_PATH {
+    if route != SAMPLE_PATH && route != BATCH_PATH && route != DIAGNOSE_PATH {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "unsupported cache route"));
     }
     if body.len() > MAX_RECORD_BYTES || body.contains(['\r', '\n']) {
@@ -170,7 +199,9 @@ pub fn flush_cache(addr: &str, path: &Path) -> usize {
         let (route, body) = line
             .split_once('\t')
             .unwrap_or((SAMPLE_PATH, *line));
-        if body.len() > MAX_RECORD_BYTES || (route != SAMPLE_PATH && route != DIAGNOSE_PATH) {
+        if body.len() > MAX_RECORD_BYTES
+            || (route != SAMPLE_PATH && route != BATCH_PATH && route != DIAGNOSE_PATH)
+        {
             return sent;
         }
         if !forward_to(addr, route, body) {
@@ -334,6 +365,31 @@ mod tests {
     }
 
     #[test]
+    fn batch_body_encodes_multiple_idempotent_samples() {
+        let body = batch_body(&[
+            OwnedSample {
+                event_id: "boot-1-sample-0".to_string(),
+                device_id: "motor-01".to_string(),
+                metric: "vibration_rms".to_string(),
+                value: 1.2,
+                level: "normal".to_string(),
+                temp_c: 55.0,
+            },
+            OwnedSample {
+                event_id: "boot-1-sample-1".to_string(),
+                device_id: "motor-01".to_string(),
+                metric: "vibration_rms".to_string(),
+                value: 4.8,
+                level: "critical".to_string(),
+                temp_c: 56.0,
+            },
+        ]);
+        assert!(body.starts_with("[{\"event_id\":\"boot-1-sample-0\""));
+        assert!(body.contains("{\"event_id\":\"boot-1-sample-1\""));
+        assert!(body.ends_with("}]"));
+    }
+
+    #[test]
     fn forward_to_uses_requested_path() {
         use std::io::{Read as _, Write as _};
         use std::net::TcpListener;
@@ -357,6 +413,9 @@ mod tests {
     #[test]
     fn rejects_unrecognized_route_before_connecting() {
         assert!(!forward_to("127.0.0.1:1", "/admin", "{}"));
+        let path = temp_path("route-invalid");
+        assert!(append_cache_to(&path, "/admin", "{}").is_err());
+        assert!(!path.exists());
     }
 
     #[test]
