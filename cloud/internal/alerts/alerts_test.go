@@ -136,3 +136,27 @@ func TestOpenStoreRestoresAckAndDedupState(t *testing.T) {
 		t.Fatalf("next alert = %+v, %v", createdNext, err)
 	}
 }
+
+func TestFailedJournalWriteDoesNotConsumeAlert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.jsonl")
+	engine, err := alerts.OpenStore(path, time.Minute)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if alert, err := engine.EvaluateWithError(sample("critical")); err == nil || alert != nil {
+		t.Fatalf("closed journal write = %+v, %v; want error", alert, err)
+	}
+
+	recovered, err := alerts.OpenStore(path, time.Minute)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer recovered.Close()
+	alert, err := recovered.EvaluateWithError(sample("critical"))
+	if err != nil || alert == nil || alert.ID != "alert-1" {
+		t.Fatalf("retry after restart = %+v, %v", alert, err)
+	}
+}

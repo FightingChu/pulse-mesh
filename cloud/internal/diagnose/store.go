@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"pulse-mesh/cloud/internal/journal"
 )
 
 type Store struct {
@@ -32,9 +34,13 @@ func OpenStore(path string, limit int) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return nil, fmt.Errorf("create diagnosis store directory: %w", err)
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open diagnosis store: %w", err)
+	}
+	if _, err := journal.RepairIncompleteTail(file); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("repair diagnosis store: %w", err)
 	}
 	store := NewStore(limit)
 	store.file = file
@@ -101,11 +107,8 @@ func (s *Store) Add(r Result) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("encode diagnosis: %w", err)
 		}
-		if _, err := s.file.Write(append(encoded, '\n')); err != nil {
-			return false, fmt.Errorf("append diagnosis: %w", err)
-		}
-		if err := s.file.Sync(); err != nil {
-			return false, fmt.Errorf("sync diagnosis: %w", err)
+		if err := journal.AppendSynced(s.file, append(encoded, '\n')); err != nil {
+			return false, fmt.Errorf("persist diagnosis: %w", err)
 		}
 	}
 	return s.addMemory(r), nil

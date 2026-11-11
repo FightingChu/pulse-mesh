@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -102,6 +103,16 @@ func TestOpenStoreRestoresSamplesAndEventIndex(t *testing.T) {
 	}
 	if err := first.Close(); err != nil {
 		t.Fatalf("close first: %v", err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatalf("open for simulated torn write: %v", err)
+	}
+	if _, err := file.WriteString(`{"event_id":"torn`); err != nil {
+		t.Fatalf("append torn tail: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close simulated torn write: %v", err)
 	}
 
 	second, err := ingest.OpenStore(path)

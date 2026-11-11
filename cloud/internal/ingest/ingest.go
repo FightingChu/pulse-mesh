@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"pulse-mesh/cloud/internal/journal"
 )
 
 type Sample struct {
@@ -37,9 +39,13 @@ func OpenStore(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return nil, fmt.Errorf("create sample store directory: %w", err)
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open sample store: %w", err)
+	}
+	if _, err := journal.RepairIncompleteTail(file); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("repair sample store: %w", err)
 	}
 	store := &Store{seen: make(map[string]struct{}), file: file}
 	if err := store.load(file); err != nil {
@@ -108,11 +114,8 @@ func (s *Store) Add(v Sample) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("encode sample: %w", err)
 		}
-		if _, err := s.file.Write(append(encoded, '\n')); err != nil {
-			return false, fmt.Errorf("append sample: %w", err)
-		}
-		if err := s.file.Sync(); err != nil {
-			return false, fmt.Errorf("sync sample: %w", err)
+		if err := journal.AppendSynced(s.file, append(encoded, '\n')); err != nil {
+			return false, fmt.Errorf("persist sample: %w", err)
 		}
 	}
 	return s.addMemory(v), nil

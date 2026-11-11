@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"pulse-mesh/cloud/internal/ingest"
+	"pulse-mesh/cloud/internal/journal"
 )
 
 type Alert struct {
@@ -63,9 +64,13 @@ func OpenStore(path string, window time.Duration) (*Engine, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return nil, fmt.Errorf("create alert store directory: %w", err)
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open alert store: %w", err)
+	}
+	if _, err := journal.RepairIncompleteTail(file); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("repair alert store: %w", err)
 	}
 	engine := New(window)
 	engine.file = file
@@ -137,11 +142,8 @@ func (e *Engine) appendRecord(record journalRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode alert record: %w", err)
 	}
-	if _, err := e.file.Write(append(encoded, '\n')); err != nil {
-		return fmt.Errorf("append alert record: %w", err)
-	}
-	if err := e.file.Sync(); err != nil {
-		return fmt.Errorf("sync alert record: %w", err)
+	if err := journal.AppendSynced(e.file, append(encoded, '\n')); err != nil {
+		return fmt.Errorf("persist alert record: %w", err)
 	}
 	return nil
 }
@@ -195,9 +197,8 @@ func (e *Engine) raise(deviceID, metric, level string, value float64, message st
 		return nil, nil
 	}
 
-	e.seq++
 	alert := Alert{
-		ID:        fmt.Sprintf("alert-%d", e.seq),
+		ID:        fmt.Sprintf("alert-%d", e.seq+1),
 		DeviceID:  deviceID,
 		Metric:    metric,
 		Level:     level,
@@ -208,6 +209,7 @@ func (e *Engine) raise(deviceID, metric, level string, value float64, message st
 	if err := e.appendRecord(journalRecord{Type: "create", Alert: &alert, SeenKey: key, SeenAt: &now}); err != nil {
 		return nil, err
 	}
+	e.seq++
 	e.seen[key] = now
 	e.addMemory(alert)
 	return &alert, nil
