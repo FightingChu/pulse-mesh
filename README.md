@@ -12,6 +12,7 @@
 - `edge/` Rust std-only，转发云端，断网落 `cache.jsonl`
 - `cloud/` Go 1.27 stdlib-only，`/health`、`POST/GET /api/v1/samples`
 - `cloud/internal/alerts` 告警引擎，5 分钟去重 + 确认接口
+- `GET /metrics` Prometheus 计数器，请求日志 + CORS + 优雅关闭
 - `ai/` Python 3.14 stdlib-only，z-score 异常检测 + FFT 频谱故障分类
 - `mobile/` Flutter，样本列表 + 离线状态
 - `infra/` docker-compose + K8s Deployment

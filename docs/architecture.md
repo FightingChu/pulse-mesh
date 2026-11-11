@@ -36,6 +36,14 @@ GET /api/v1/alerts?device=motor-01&include_acked=1 查询，POST /api/v1/alerts/
 云端故障告警的 metric 写成 fault:<type>，所以不同故障不会被同一条去重键吃掉。
 GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_URL 覆盖，默认 http://127.0.0.1:8000。
 
+# 可观测性与运行时
+
+- 每个请求打一行访问日志：方法、路径、状态码、耗时。
+- GET /metrics 输出 Prometheus 文本，计数器按方法、路径、状态码聚合，告警确认路径归一化为 /api/v1/alerts/{id}/ack。
+- 所有响应带 CORS 头，OPTIONS 预检直接返回 204。
+- 服务设置 ReadHeader 5s、Read 15s、Write 15s、Idle 60s 超时，收到 SIGINT/SIGTERM 后 10s 内优雅退出。
+- AI 服务用 ThreadingHTTPServer，支持并发请求，访问日志默认开启，可用 PULSE_ACCESS_LOG=0 关闭。
+
 # 判据
 
 历史窗口不含当前值，至少 3 个点，标准差下限 1e-6，避免单点尖峰把阈值自己撑大。

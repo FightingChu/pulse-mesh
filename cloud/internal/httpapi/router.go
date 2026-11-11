@@ -11,7 +11,9 @@ import (
 )
 
 func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagnoses *diagnose.Store) http.Handler {
+	metrics := NewMetrics()
 	mux := http.NewServeMux()
+	mux.Handle("/metrics", metrics.Handler())
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -115,7 +117,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		writeJSON(w, http.StatusOK, diagnoses.List(r.URL.Query().Get("device"), 100))
 	})
 
-	return mux
+	return withCORS(withLogging(metrics, mux))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

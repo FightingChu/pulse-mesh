@@ -1,0 +1,102 @@
+package httpapi
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(body []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.ResponseWriter.Write(body)
+}
+
+type Metrics struct {
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func NewMetrics() *Metrics {
+	return &Metrics{counts: make(map[string]int)}
+}
+
+func normalizePath(path string) string {
+	if strings.HasPrefix(path, "/api/v1/alerts/") && strings.HasSuffix(path, "/ack") {
+		return "/api/v1/alerts/{id}/ack"
+	}
+	return path
+}
+
+func (m *Metrics) observe(method, path string, status int) {
+	key := fmt.Sprintf("%s|%s|%d", method, normalizePath(path), status)
+	m.mu.Lock()
+	m.counts[key]++
+	m.mu.Unlock()
+}
+
+func (m *Metrics) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		keys := make([]string, 0, len(m.counts))
+		snapshot := make(map[string]int, len(m.counts))
+		for key, value := range m.counts {
+			keys = append(keys, key)
+			snapshot[key] = value
+		}
+		m.mu.Unlock()
+
+		sort.Strings(keys)
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		fmt.Fprintln(w, "# TYPE pulse_http_requests_total counter")
+		for _, key := range keys {
+			parts := strings.SplitN(key, "|", 3)
+			if len(parts) != 3 {
+				continue
+			}
+			fmt.Fprintf(w, "pulse_http_requests_total{method=%q,path=%q,status=%q} %d\n",
+				parts[0], parts[1], parts[2], snapshot[key])
+		}
+	})
+}
+
+func withLogging(metrics *Metrics, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w}
+		next.ServeHTTP(rec, r)
+		if rec.status == 0 {
+			rec.status = http.StatusOK
+		}
+		metrics.observe(r.Method, r.URL.Path, rec.status)
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Microsecond))
+	})
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

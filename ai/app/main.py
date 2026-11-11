@@ -1,5 +1,5 @@
-import json, math
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import json, math, os, sys, time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 import spectrum
@@ -67,8 +67,17 @@ class H(BaseHTTPRequestHandler):
         data = json.dumps(obj).encode()
         self.send_response(status); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
     def log_message(self, *a):
-        pass
+        if os.environ.get('PULSE_ACCESS_LOG', '1') == '0':
+            return
+        sys.stderr.write('%s %s\n' % (time.strftime('%Y-%m-%dT%H:%M:%S'), a[0] % a[1:]))
 
 if __name__ == '__main__':
-    print('pulse-mesh ai listening :8000')
-    HTTPServer(('0.0.0.0', 8000), H).serve_forever()
+    server = ThreadingHTTPServer(('0.0.0.0', 8000), H)
+    server.daemon_threads = True
+    print('pulse-mesh ai listening :8000', flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
