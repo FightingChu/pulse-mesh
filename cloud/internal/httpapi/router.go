@@ -54,7 +54,11 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				})
 				return
 			}
-			created := engine.Evaluate(s)
+			created, err := engine.EvaluateWithError(s)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
+				return
+			}
 			writeJSON(w, http.StatusCreated, map[string]any{
 				"stored": store.Count(),
 				"alert":  created,
@@ -88,7 +92,12 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "use POST /api/v1/alerts/{id}/ack"})
 			return
 		}
-		if !engine.Ack(id) {
+		acked, err := engine.AckWithError(id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
+			return
+		}
+		if !acked {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "alert not found"})
 			return
 		}
@@ -161,7 +170,11 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				return
 			}
 		}
-		alert := engine.EvaluateFault(result.DeviceID, result.Fault)
+		alert, err := engine.EvaluateFaultWithError(result.DeviceID, result.Fault)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"diagnosis": result,
 			"alert":     alert,

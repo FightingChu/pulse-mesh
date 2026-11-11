@@ -1,6 +1,7 @@
 package alerts_test
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -94,5 +95,44 @@ func TestListFiltersByDevice(t *testing.T) {
 	}
 	if got := len(engine.List("", false)); got != 2 {
 		t.Fatalf("all len = %d, want 2", got)
+	}
+}
+
+func TestOpenStoreRestoresAckAndDedupState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.jsonl")
+	first, err := alerts.OpenStore(path, time.Hour)
+	if err != nil {
+		t.Fatalf("open first: %v", err)
+	}
+	created, err := first.EvaluateWithError(sample("critical"))
+	if err != nil || created == nil {
+		t.Fatalf("create alert = %+v, %v", created, err)
+	}
+	if acked, err := first.AckWithError(created.ID); err != nil || !acked {
+		t.Fatalf("ack = %v, %v", acked, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first: %v", err)
+	}
+
+	second, err := alerts.OpenStore(path, time.Hour)
+	if err != nil {
+		t.Fatalf("open second: %v", err)
+	}
+	defer second.Close()
+	if got := len(second.List("", false)); got != 0 {
+		t.Fatalf("open alert count = %d, want 0", got)
+	}
+	all := second.List("", true)
+	if len(all) != 1 || !all[0].Acked || all[0].ID != created.ID {
+		t.Fatalf("restored alert = %+v", all)
+	}
+	if duplicate, err := second.EvaluateWithError(sample("critical")); err != nil || duplicate != nil {
+		t.Fatalf("dedup after restart = %+v, %v", duplicate, err)
+	}
+	next := sample("warning")
+	createdNext, err := second.EvaluateWithError(next)
+	if err != nil || createdNext == nil || createdNext.ID != "alert-2" {
+		t.Fatalf("next alert = %+v, %v", createdNext, err)
 	}
 }
