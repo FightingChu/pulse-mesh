@@ -15,6 +15,7 @@
 - `GET /metrics` Prometheus 计数器，请求日志 + CORS + 优雅关闭
 - API 限制 128 KiB 请求体；网关 outbox 有容量上限、同步写盘和 2xx 确认重放
 - 网关事件带 `event_id`，云端对样本和诊断请求幂等去重
+- 设置 `PULSE_DATA_DIR` 开启 JSONL 持久化；Compose/Helm 已挂载 `pulse-data` 卷
 - `ai/` Python 3.14 stdlib-only，z-score 异常检测 + FFT 频谱故障分类
 - `mobile/` Flutter，样本列表 + 离线状态
 - `infra/` docker-compose + K8s Deployment
@@ -85,7 +86,7 @@ curl "http://127.0.0.1:8080/api/v1/samples?device=motor-01"
 
 ## 验证状态
 
-- 已跑通：Go 33 个测试、Python 22 个测试、Rust 13 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、网关波形诊断转 AI 并自动告警
+- 已跑通：Go 35 个测试、Python 22 个测试、Rust 13 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、网关波形诊断转 AI 并自动告警
 - 未验证：Flutter（本机未装）、Docker / K8s 部署（本机无 Docker）
 
 工具链安装见 `docs/dev-setup.md`。中文路径会让 MinGW / Rust 链接器读不到文件，用 ASCII junction 构建。

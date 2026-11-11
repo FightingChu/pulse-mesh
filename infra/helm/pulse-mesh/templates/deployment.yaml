@@ -23,6 +23,11 @@ spec:
           env:
             - name: PULSE_AI_URL
               value: "http://{{ .Release.Name }}-ai:8000"
+            - name: PULSE_DATA_DIR
+              value: /var/lib/pulse-mesh
+          volumeMounts:
+            - name: pulse-data
+              mountPath: /var/lib/pulse-mesh
           readinessProbe:
             httpGet:
               path: /health
@@ -36,3 +41,7 @@ spec:
             periodSeconds: 20
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: pulse-data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-cloud-data

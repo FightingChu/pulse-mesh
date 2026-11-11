@@ -1,12 +1,21 @@
 package diagnose
 
-import "sync"
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+)
 
 type Store struct {
 	mu    sync.Mutex
 	items []Result
 	limit int
 	seen  map[string]struct{}
+	file  *os.File
 }
 
 func NewStore(limit int) *Store {
@@ -16,9 +25,50 @@ func NewStore(limit int) *Store {
 	return &Store{limit: limit, seen: make(map[string]struct{})}
 }
 
-func (s *Store) Add(r Result) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func OpenStore(path string, limit int) (*Store, error) {
+	if path == "" {
+		return NewStore(limit), nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		return nil, fmt.Errorf("create diagnosis store directory: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("open diagnosis store: %w", err)
+	}
+	store := NewStore(limit)
+	store.file = file
+	if err := store.load(file); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *Store) load(file *os.File) error {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek diagnosis store: %w", err)
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
+	for scanner.Scan() {
+		if len(scanner.Bytes()) == 0 {
+			continue
+		}
+		var result Result
+		if err := json.Unmarshal(scanner.Bytes(), &result); err != nil {
+			return fmt.Errorf("decode diagnosis store: %w", err)
+		}
+		s.addMemory(result)
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read diagnosis store: %w", err)
+	}
+	_, err := file.Seek(0, io.SeekEnd)
+	return err
+}
+
+func (s *Store) addMemory(r Result) bool {
 	key := resultKey(r.DeviceID, r.EventID)
 	if key != "" {
 		if _, exists := s.seen[key]; exists {
@@ -35,6 +85,30 @@ func (s *Store) Add(r Result) bool {
 		s.items = s.items[len(s.items)-s.limit:]
 	}
 	return true
+}
+
+func (s *Store) Add(r Result) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := resultKey(r.DeviceID, r.EventID)
+	if key != "" {
+		if _, exists := s.seen[key]; exists {
+			return false, nil
+		}
+	}
+	if s.file != nil {
+		encoded, err := json.Marshal(r)
+		if err != nil {
+			return false, fmt.Errorf("encode diagnosis: %w", err)
+		}
+		if _, err := s.file.Write(append(encoded, '\n')); err != nil {
+			return false, fmt.Errorf("append diagnosis: %w", err)
+		}
+		if err := s.file.Sync(); err != nil {
+			return false, fmt.Errorf("sync diagnosis: %w", err)
+		}
+	}
+	return s.addMemory(r), nil
 }
 
 func (s *Store) Get(device, eventID string) (Result, bool) {
@@ -78,4 +152,13 @@ func (s *Store) Count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.items)
+}
+
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.file == nil {
+		return nil
+	}
+	return s.file.Close()
 }

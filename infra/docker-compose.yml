@@ -3,8 +3,11 @@ services:
     build: ../cloud
     environment:
       PULSE_AI_URL: http://ai:8000
+      PULSE_DATA_DIR: /var/lib/pulse-mesh
     depends_on:
       - ai
+    volumes:
+      - pulse-data:/var/lib/pulse-mesh
     ports: ["8080:8080"]
   ai:
     image: python:3.14-slim
@@ -12,3 +15,6 @@ services:
     working_dir: /app
     volumes: ["../ai:/app"]
     ports: ["8000:8000"]
+
+volumes:
+  pulse-data:

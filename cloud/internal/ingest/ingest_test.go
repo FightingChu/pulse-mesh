@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"pulse-mesh/cloud/internal/ingest"
@@ -24,7 +25,9 @@ func TestDecodesFirmwareOutput(t *testing.T) {
 
 func TestAddStampsTimestamp(t *testing.T) {
 	store := ingest.NewStore()
-	store.Add(ingest.Sample{DeviceID: "motor-01", Metric: "vibration_rms", Value: 1.2})
+	if _, err := store.Add(ingest.Sample{DeviceID: "motor-01", Metric: "vibration_rms", Value: 1.2}); err != nil {
+		t.Fatal(err)
+	}
 
 	got := store.List("motor-01", 10)
 	if len(got) != 1 {
@@ -71,18 +74,45 @@ func TestStoreIsBounded(t *testing.T) {
 func TestStoreDeduplicatesEventIDPerDevice(t *testing.T) {
 	store := ingest.NewStore()
 	first := ingest.Sample{EventID: "boot-1-0", DeviceID: "motor-01", Metric: "vibration_rms", Value: 1}
-	if !store.Add(first) {
+	if added, err := store.Add(first); !added || err != nil {
 		t.Fatal("first event should be stored")
 	}
-	if store.Add(first) {
+	if added, err := store.Add(first); added || err != nil {
 		t.Fatal("retry should be deduplicated")
 	}
 	secondDevice := first
 	secondDevice.DeviceID = "pump-02"
-	if !store.Add(secondDevice) {
+	if added, err := store.Add(secondDevice); !added || err != nil {
 		t.Fatal("same event id from another device should be stored")
 	}
 	if got := store.Count(); got != 2 {
 		t.Fatalf("count = %d, want 2", got)
+	}
+}
+
+func TestOpenStoreRestoresSamplesAndEventIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "samples.jsonl")
+	first, err := ingest.OpenStore(path)
+	if err != nil {
+		t.Fatalf("open first: %v", err)
+	}
+	event := ingest.Sample{EventID: "boot-1-0", DeviceID: "motor-01", Metric: "vibration_rms", Value: 1.2}
+	if added, err := first.Add(event); !added || err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first: %v", err)
+	}
+
+	second, err := ingest.OpenStore(path)
+	if err != nil {
+		t.Fatalf("open second: %v", err)
+	}
+	defer second.Close()
+	if second.Count() != 1 {
+		t.Fatalf("restored count = %d, want 1", second.Count())
+	}
+	if added, err := second.Add(event); added || err != nil {
+		t.Fatalf("restored event should deduplicate, added=%v err=%v", added, err)
 	}
 }

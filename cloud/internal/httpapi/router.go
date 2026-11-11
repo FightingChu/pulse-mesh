@@ -41,7 +41,11 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample values or level"})
 				return
 			}
-			added := store.Add(s)
+			added, err := store.Add(s)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sample persistence failed"})
+				return
+			}
 			if !added {
 				writeJSON(w, http.StatusOK, map[string]any{
 					"stored":    store.Count(),
@@ -142,7 +146,12 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
-		if !diagnoses.Add(result) {
+		added, err := diagnoses.Add(result)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "diagnosis persistence failed"})
+			return
+		}
+		if !added {
 			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
 				writeJSON(w, http.StatusOK, map[string]any{
 					"diagnosis": previous,

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -29,6 +30,21 @@ func main() {
 		}
 		alertWindow = parsed
 	}
+	dataDir := os.Getenv("PULSE_DATA_DIR")
+	sampleStore := ingest.NewStore()
+	diagnosisStore := diagnose.NewStore(1000)
+	if dataDir != "" {
+		var err error
+		sampleStore, err = ingest.OpenStore(filepath.Join(dataDir, "samples.jsonl"))
+		if err != nil {
+			log.Fatalf("open sample store: %v", err)
+		}
+		diagnosisStore, err = diagnose.OpenStore(filepath.Join(dataDir, "diagnoses.jsonl"), 1000)
+		if err != nil {
+			_ = sampleStore.Close()
+			log.Fatalf("open diagnosis store: %v", err)
+		}
+	}
 	srv := &http.Server{
 		Addr:              addr,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -36,10 +52,10 @@ func main() {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		Handler: httpapi.New(
-			ingest.NewStore(),
+			sampleStore,
 			alerts.New(alertWindow),
 			diagnose.NewClient(aiURL),
-			diagnose.NewStore(1000),
+			diagnosisStore,
 		),
 	}
 
@@ -59,6 +75,12 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+	if err := sampleStore.Close(); err != nil {
+		log.Printf("close sample store: %v", err)
+	}
+	if err := diagnosisStore.Close(); err != nil {
+		log.Printf("close diagnosis store: %v", err)
 	}
 }
 

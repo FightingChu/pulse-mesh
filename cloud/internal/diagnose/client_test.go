@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"pulse-mesh/cloud/internal/diagnose"
@@ -88,17 +89,44 @@ func TestStoreIsBoundedAndNewestFirst(t *testing.T) {
 func TestStoreDeduplicatesAndGetsEvent(t *testing.T) {
 	store := diagnose.NewStore(10)
 	result := diagnose.Result{DeviceID: "motor-01", EventID: "boot-1-spectrum-0", Fault: "bearing_wear"}
-	if !store.Add(result) {
+	if added, err := store.Add(result); !added || err != nil {
 		t.Fatal("first result should be stored")
 	}
-	if store.Add(result) {
+	if added, err := store.Add(result); added || err != nil {
 		t.Fatal("retry should be deduplicated")
 	}
 	got, ok := store.Get("motor-01", "boot-1-spectrum-0")
 	if !ok || got.Fault != "bearing_wear" {
 		t.Fatalf("get = %+v, %v", got, ok)
 	}
-	if store.Add(diagnose.Result{DeviceID: "pump-02", EventID: "boot-1-spectrum-0"}) == false {
+	if added, err := store.Add(diagnose.Result{DeviceID: "pump-02", EventID: "boot-1-spectrum-0"}); !added || err != nil {
 		t.Fatal("event ID should be scoped per device")
+	}
+}
+
+func TestOpenStoreRestoresDiagnosisAndEventIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diagnoses.jsonl")
+	first, err := diagnose.OpenStore(path, 10)
+	if err != nil {
+		t.Fatalf("open first: %v", err)
+	}
+	result := diagnose.Result{DeviceID: "motor-01", EventID: "boot-1-spectrum-0", Fault: "bearing_wear"}
+	if added, err := first.Add(result); !added || err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first: %v", err)
+	}
+
+	second, err := diagnose.OpenStore(path, 10)
+	if err != nil {
+		t.Fatalf("open second: %v", err)
+	}
+	defer second.Close()
+	if second.Count() != 1 {
+		t.Fatalf("restored count = %d, want 1", second.Count())
+	}
+	if added, err := second.Add(result); added || err != nil {
+		t.Fatalf("restored event should deduplicate, added=%v err=%v", added, err)
 	}
 }

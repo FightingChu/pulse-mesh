@@ -49,6 +49,8 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - Rust HTTP 客户端设置 5s 读写超时，只接受 2xx 作为成功；未知路由在连接前拒绝。
 - 网关事件带 event_id，样本和诊断以 device_id + event_id 幂等；诊断重试返回已有结果，不重复调用 AI 或生成告警。
 - 幂等记录跟随各自内存保留窗口，云端重启后不持久；需要跨重启保证时应替换为持久化存储。
+- 设置 PULSE_DATA_DIR 后，云端将样本写入 samples.jsonl、诊断写入 diagnoses.jsonl，启动时恢复记录和 event_id 索引；Docker Compose 和 Helm 默认挂载持久卷。
+- 未设置 PULSE_DATA_DIR 时使用纯内存模式，适合本地快速开发。
 
 # 判据
 
