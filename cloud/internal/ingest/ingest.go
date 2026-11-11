@@ -99,28 +99,66 @@ func (s *Store) addMemory(v Sample) bool {
 }
 
 func (s *Store) Add(v Sample) (bool, error) {
-	if v.Ts.IsZero() {
-		v.Ts = time.Now().UTC()
+	added, err := s.AddBatch([]Sample{v})
+	if err != nil {
+		return false, err
 	}
+	return added[0], nil
+}
+
+func (s *Store) AddBatch(samples []Sample) ([]bool, error) {
+	if len(samples) == 0 {
+		return []bool{}, nil
+	}
+	prepared := append([]Sample(nil), samples...)
+	for i := range prepared {
+		if prepared[i].Ts.IsZero() {
+			prepared[i].Ts = time.Now().UTC()
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := eventKey(v.DeviceID, v.EventID)
-	if key != "" {
-		if _, exists := s.seen[key]; exists {
-			return false, nil
+	added := make([]bool, len(prepared))
+	batchSeen := make(map[string]struct{}, len(prepared))
+	encoded := make([][]byte, 0, len(prepared))
+	for i, sample := range prepared {
+		key := eventKey(sample.DeviceID, sample.EventID)
+		if key != "" {
+			if _, exists := s.seen[key]; exists {
+				continue
+			}
+			if _, exists := batchSeen[key]; exists {
+				continue
+			}
+			batchSeen[key] = struct{}{}
+		}
+		added[i] = true
+		if s.file != nil {
+			line, err := json.Marshal(sample)
+			if err != nil {
+				return nil, fmt.Errorf("encode sample %d: %w", i, err)
+			}
+			encoded = append(encoded, append(line, '\n'))
 		}
 	}
-	if s.file != nil {
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return false, fmt.Errorf("encode sample: %w", err)
+
+	if s.file != nil && len(encoded) > 0 {
+		var record []byte
+		for _, line := range encoded {
+			record = append(record, line...)
 		}
-		if err := journal.AppendSynced(s.file, append(encoded, '\n')); err != nil {
+		if err := journal.AppendSynced(s.file, record); err != nil {
 			s.writesFailed++
-			return false, fmt.Errorf("persist sample: %w", err)
+			return nil, fmt.Errorf("persist sample batch: %w", err)
 		}
 	}
-	return s.addMemory(v), nil
+	for i, sample := range prepared {
+		if added[i] {
+			s.addMemory(sample)
+		}
+	}
+	return added, nil
 }
 
 func eventKey(deviceID, eventID string) string {

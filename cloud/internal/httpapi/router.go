@@ -112,22 +112,18 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				return
 			}
 		}
+		addedItems, batchAlerts, err := processSamples(store, engine, samples)
+		if err != nil {
+			writeStorageError(w, err, "batch persistence failed")
+			return
+		}
 		stored := 0
 		duplicates := 0
-		createdAlerts := make([]alerts.Alert, 0)
-		for _, sample := range samples {
-			added, created, err := processSample(store, engine, sample)
-			if err != nil {
-				writeStorageError(w, err, "batch persistence failed")
-				return
-			}
+		for _, added := range addedItems {
 			if added {
 				stored++
 			} else {
 				duplicates++
-			}
-			if created != nil {
-				createdAlerts = append(createdAlerts, *created)
 			}
 		}
 		status := http.StatusCreated
@@ -138,7 +134,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			"received":   len(samples),
 			"stored":     stored,
 			"duplicates": duplicates,
-			"alerts":     createdAlerts,
+			"alerts":     batchAlerts,
 		})
 	})
 
@@ -341,13 +337,30 @@ func validateSample(s ingest.Sample) error {
 }
 
 func processSample(store *ingest.Store, engine *alerts.Engine, sample ingest.Sample) (bool, *alerts.Alert, error) {
-	added, err := store.Add(sample)
+	addedItems, createdAlerts, err := processSamples(store, engine, []ingest.Sample{sample})
 	if err != nil {
 		return false, nil, err
 	}
-	created, err := engine.EvaluateWithError(sample)
+	if len(createdAlerts) == 0 {
+		return addedItems[0], nil, nil
+	}
+	return addedItems[0], &createdAlerts[0], nil
+}
+
+func processSamples(store *ingest.Store, engine *alerts.Engine, samples []ingest.Sample) ([]bool, []alerts.Alert, error) {
+	added, err := store.AddBatch(samples)
 	if err != nil {
-		return added, nil, err
+		return nil, nil, err
+	}
+	created := make([]alerts.Alert, 0)
+	for _, sample := range samples {
+		alert, err := engine.EvaluateWithError(sample)
+		if err != nil {
+			return added, created, err
+		}
+		if alert != nil {
+			created = append(created, *alert)
+		}
 	}
 	return added, created, nil
 }

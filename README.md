@@ -16,6 +16,7 @@
 - API 限制 128 KiB 请求体；网关 outbox 有容量上限、同步写盘和 2xx 确认重放
 - 网关事件带 `event_id`，云端对样本和诊断请求幂等去重
 - 网关按批发送遥测（`POST /api/v1/samples/batch`），减少连接与落盘同步次数
+- 云端每批样本一次 JSONL append/fsync，整批落盘成功后才确认
 - 网关设备 ID、采样数、间隔、采样率与转频通过 `PULSE_EDGE_*` 环境变量配置并校验
 - 设置 `PULSE_DATA_DIR` 开启 JSONL 持久化；Compose/Helm 已挂载 `pulse-data` 卷
 - AI 熔断冷却保护；云端最多并发处理 4 个诊断请求
@@ -92,7 +93,7 @@ curl "http://127.0.0.1:8080/api/v1/samples?device=motor-01"
 
 ## 验证状态
 
-- 已跑通：Go 44 个测试、Python 22 个测试、Rust 17 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、网关波形诊断转 AI 并自动告警
+- 已跑通：Go 45 个测试、Python 22 个测试、Rust 17 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、网关波形诊断转 AI 并自动告警
 - 未验证：Flutter（本机未装）、Docker / K8s 部署（本机无 Docker）
 
 工具链安装见 `docs/dev-setup.md`。中文路径会让 MinGW / Rust 链接器读不到文件，用 ASCII junction 构建。

@@ -127,3 +127,47 @@ func TestOpenStoreRestoresSamplesAndEventIndex(t *testing.T) {
 		t.Fatalf("restored event should deduplicate, added=%v err=%v", added, err)
 	}
 }
+
+func TestAddBatchDeduplicatesInsideBatchAndAcrossRestarts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "samples.jsonl")
+	store, err := ingest.OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	samples := []ingest.Sample{
+		{EventID: "batch-1", DeviceID: "motor-01", Metric: "vibration_rms", Value: 1},
+		{EventID: "batch-1", DeviceID: "motor-01", Metric: "vibration_rms", Value: 1},
+		{EventID: "batch-1", DeviceID: "pump-02", Metric: "vibration_rms", Value: 2},
+	}
+	added, err := store.AddBatch(samples)
+	if err != nil {
+		t.Fatalf("add batch: %v", err)
+	}
+	if len(added) != 3 || !added[0] || added[1] || !added[2] {
+		t.Fatalf("added = %v", added)
+	}
+	if got := store.Count(); got != 2 {
+		t.Fatalf("count = %d, want 2", got)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := ingest.OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	added, err = reopened.AddBatch(samples)
+	if err != nil {
+		t.Fatalf("retry batch: %v", err)
+	}
+	for index, wasAdded := range added {
+		if wasAdded {
+			t.Fatalf("event %d was added again after restart", index)
+		}
+	}
+	if got := reopened.Count(); got != 2 {
+		t.Fatalf("reopened count = %d, want 2", got)
+	}
+}
