@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import sys
 import threading
@@ -58,6 +59,40 @@ class HTTPTest(unittest.TestCase):
             payload = json.load(resp)
         self.assertEqual(payload["level"], "normal")
         self.assertEqual(payload["rms"], 0.0)
+
+    def test_post_spectrum_bearing(self):
+        values = [
+            0.6 * math.sin(2.0 * math.pi * 120.0 * i / 1000.0) for i in range(1024)
+        ]
+        body = json.dumps({
+            "device_id": "motor-01",
+            "values": values,
+            "sample_rate_hz": 1000.0,
+            "rotation_hz": 25.0,
+        }).encode()
+        req = urllib.request.Request(
+            self.base + "/spectrum",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.load(resp)
+        self.assertEqual(payload["device_id"], "motor-01")
+        self.assertEqual(payload["fault"], "bearing_wear")
+        self.assertAlmostEqual(payload["dominant_hz"], 120.0, delta=2.0)
+
+    def test_post_spectrum_rejects_bad_length(self):
+        body = json.dumps({"values": [1.0, 2.0, 3.0]}).encode()
+        req = urllib.request.Request(
+            self.base + "/spectrum",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,24 @@
 AI(Python) 用历史基线做流式异常检测：z = (当前值 - 历史均值) / 历史标准差。
 App(Flutter) 拉 /api/v1/samples 列表展示，离线显示 offline。
 
+# 频谱分析
+
+节点以 1 kHz 采样 1024 点，加 Hann 窗后做 radix-2 FFT，输出主频、峰值幅度和三个频带能量占比。
+频带划分为 0-10 Hz、10-100 Hz、100-500 Hz，C++ 与 Python 实现同一套判据：
+
+- high_band > 0.25 -> bearing_wear
+- 主频 / 转频 在 1.8-2.2 -> misalignment
+- 主频 / 转频 在 0.8-1.2 -> imbalance
+- low_band > 0.5 -> looseness
+- 其余 -> normal
+
+Hann 窗相干增益为 0.5，峰值幅度按 4/N 归一化补偿。
+
+# 告警
+
+云端收到 warning / critical 样本时生成告警，按 device_id + metric + level 在 5 分钟窗口内去重。
+GET /api/v1/alerts?device=motor-01&include_acked=1 查询，POST /api/v1/alerts/{id}/ack 确认。
+
 # 判据
 
 历史窗口不含当前值，至少 3 个点，标准差下限 1e-6，避免单点尖峰把阈值自己撑大。

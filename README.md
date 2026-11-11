@@ -11,7 +11,8 @@
 - `firmware/` C++17，RMS 计算 + 三级判级，输出 JSON 行
 - `edge/` Rust std-only，转发云端，断网落 `cache.jsonl`
 - `cloud/` Go 1.27 stdlib-only，`/health`、`POST/GET /api/v1/samples`
-- `ai/` Python 3.14 stdlib-only，历史基线 z-score 异常检测
+- `cloud/internal/alerts` 告警引擎，5 分钟去重 + 确认接口
+- `ai/` Python 3.14 stdlib-only，z-score 异常检测 + FFT 频谱故障分类
 - `mobile/` Flutter，样本列表 + 离线状态
 - `infra/` docker-compose + K8s Deployment
 - `tools/verify.ps1` 一键跑全部检查
@@ -32,6 +33,18 @@ AI：
 cd ai
 py app/main.py
 curl http://127.0.0.1:8000/health
+```
+
+频谱诊断：
+```
+curl -X POST http://127.0.0.1:8000/spectrum -H "Content-Type: application/json" \
+  -d '{"device_id":"motor-01","values":[1024 个采样点],"sample_rate_hz":1000,"rotation_hz":25}'
+```
+
+告警：
+```
+curl "http://127.0.0.1:8080/api/v1/alerts?device=motor-01"
+curl -X POST http://127.0.0.1:8080/api/v1/alerts/alert-1/ack
 ```
 
 验证：
@@ -58,9 +71,11 @@ curl "http://127.0.0.1:8080/api/v1/samples?device=motor-01"
 历史窗口不含当前值，至少 3 点，标准差下限 `1e-6`。
 `|z| >= 6` critical，`|z| >= 3` warning，其余 normal。
 
+频谱按主频与转频比值和频带能量分类；Hann 窗峰值按 `4/N` 归一化。
+
 ## 验证状态
 
-- 已跑通：Go 11 个测试、Python 10 个测试、Rust 4 个测试、C++ 固件构建与 critical 判级、云端+网关端到端与离线回放
+- 已跑通：Go 18 个测试、Python 19 个测试、Rust 4 个测试、C++ 固件 CTest、云端+网关端到端与离线回放
 - 未验证：Flutter（本机未装）、Docker / K8s 部署（本机无 Docker）
 
 工具链安装见 `docs/dev-setup.md`。中文路径会让 MinGW / Rust 链接器读不到文件，用 ASCII junction 构建。
