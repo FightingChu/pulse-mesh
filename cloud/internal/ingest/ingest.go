@@ -24,10 +24,11 @@ type Sample struct {
 }
 
 type Store struct {
-	mu    sync.Mutex
-	items []Sample
-	seen  map[string]struct{}
-	file  *os.File
+	mu           sync.Mutex
+	items        []Sample
+	seen         map[string]struct{}
+	file         *os.File
+	writesFailed uint64
 }
 
 func NewStore() *Store { return &Store{seen: make(map[string]struct{})} }
@@ -115,6 +116,7 @@ func (s *Store) Add(v Sample) (bool, error) {
 			return false, fmt.Errorf("encode sample: %w", err)
 		}
 		if err := journal.AppendSynced(s.file, append(encoded, '\n')); err != nil {
+			s.writesFailed++
 			return false, fmt.Errorf("persist sample: %w", err)
 		}
 	}
@@ -126,6 +128,18 @@ func eventKey(deviceID, eventID string) string {
 		return ""
 	}
 	return deviceID + "\x00" + eventID
+}
+
+func (s *Store) Stats() (int, int64, uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var bytes int64
+	if s.file != nil {
+		if info, err := s.file.Stat(); err == nil {
+			bytes = info.Size()
+		}
+	}
+	return len(s.items), bytes, s.writesFailed
 }
 
 func (s *Store) List(device string, n int) []Sample {

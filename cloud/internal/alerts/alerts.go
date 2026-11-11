@@ -29,13 +29,14 @@ type Alert struct {
 }
 
 type Engine struct {
-	mu      sync.Mutex
-	items   []Alert
-	seen    map[string]time.Time
-	window  time.Duration
-	seq     int
-	maxKeep int
-	file    *os.File
+	mu           sync.Mutex
+	items        []Alert
+	seen         map[string]time.Time
+	window       time.Duration
+	seq          int
+	maxKeep      int
+	file         *os.File
+	writesFailed uint64
 }
 
 func New(window time.Duration) *Engine {
@@ -142,7 +143,8 @@ func (e *Engine) appendRecord(record journalRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode alert record: %w", err)
 	}
-	if err := journal.AppendSynced(e.file, append(encoded, '\n')); err != nil {
+	if err := journal.AppendSyncedLimit(e.file, append(encoded, '\n'), journal.MaxJournalBytes); err != nil {
+		e.writesFailed++
 		return fmt.Errorf("persist alert record: %w", err)
 	}
 	return nil
@@ -288,4 +290,16 @@ func (e *Engine) Check() error {
 		return err
 	}
 	return e.file.Sync()
+}
+
+func (e *Engine) Stats() (int, int64, uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var bytes int64
+	if e.file != nil {
+		if info, err := e.file.Stat(); err == nil {
+			bytes = info.Size()
+		}
+	}
+	return len(e.items), bytes, e.writesFailed
 }

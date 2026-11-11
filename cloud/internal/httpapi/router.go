@@ -11,6 +11,7 @@ import (
 	"pulse-mesh/cloud/internal/alerts"
 	"pulse-mesh/cloud/internal/diagnose"
 	"pulse-mesh/cloud/internal/ingest"
+	"pulse-mesh/cloud/internal/journal"
 )
 
 const maxJSONBody = 128 * 1024
@@ -21,7 +22,15 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 	metrics := NewMetrics()
 	mux := http.NewServeMux()
 	diagnoseSlots := make(chan struct{}, maxConcurrentDiagnoses)
-	mux.Handle("/metrics", metrics.Handler())
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		sampleCount, sampleBytes, sampleFailures := store.Stats()
+		diagnosisCount, diagnosisBytes, diagnosisFailures := diagnoses.Stats()
+		alertCount, alertBytes, alertFailures := engine.Stats()
+		metrics.setStore("samples", sampleCount, sampleBytes, sampleFailures)
+		metrics.setStore("diagnoses", diagnosisCount, diagnosisBytes, diagnosisFailures)
+		metrics.setStore("alerts", alertCount, alertBytes, alertFailures)
+		metrics.Handler().ServeHTTP(w, r)
+	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -62,7 +71,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			}
 			added, err := store.Add(s)
 			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sample persistence failed"})
+				writeStorageError(w, err, "sample persistence failed")
 				return
 			}
 			if !added {
@@ -80,7 +89,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			}
 			created, err := engine.EvaluateWithError(s)
 			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
+				writeStorageError(w, err, "alert persistence failed")
 				return
 			}
 			writeJSON(w, http.StatusCreated, map[string]any{
@@ -118,7 +127,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		}
 		acked, err := engine.AckWithError(id)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
+			writeStorageError(w, err, "alert persistence failed")
 			return
 		}
 		if !acked {
@@ -147,7 +156,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
 				alert, err := engine.EvaluateFaultWithError(previous.DeviceID, previous.Fault)
 				if err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
+					writeStorageError(w, err, "alert persistence failed")
 					return
 				}
 				writeJSON(w, http.StatusOK, map[string]any{
@@ -199,14 +208,14 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		}
 		added, err := diagnoses.Add(result)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "diagnosis persistence failed"})
+			writeStorageError(w, err, "diagnosis persistence failed")
 			return
 		}
 		if !added {
 			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
 				alert, err := engine.EvaluateFaultWithError(previous.DeviceID, previous.Fault)
 				if err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
+					writeStorageError(w, err, "alert persistence failed")
 					return
 				}
 				writeJSON(w, http.StatusOK, map[string]any{
@@ -219,7 +228,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		}
 		alert, err := engine.EvaluateFaultWithError(result.DeviceID, result.Fault)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "alert persistence failed"})
+			writeStorageError(w, err, "alert persistence failed")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -244,6 +253,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeStorageError(w http.ResponseWriter, err error, message string) {
+	status := http.StatusInternalServerError
+	if errors.Is(err, journal.ErrCapacity) {
+		status = http.StatusInsufficientStorage
+	}
+	writeJSON(w, status, map[string]string{"error": message})
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {

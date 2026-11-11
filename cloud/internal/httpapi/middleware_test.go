@@ -60,6 +60,10 @@ func TestMetricsCountsRequests(t *testing.T) {
 	if !strings.Contains(text, `path="/health"`) || !strings.Contains(text, `status="200"`) {
 		t.Fatalf("missing health counter: %s", text)
 	}
+	if !strings.Contains(text, `pulse_store_records{store="samples"} 0`) ||
+		!strings.Contains(text, `pulse_store_journal_bytes{store="alerts"} 0`) {
+		t.Fatalf("missing fixed store metrics: %s", text)
+	}
 }
 
 func TestMetricsNormalizesAckPath(t *testing.T) {

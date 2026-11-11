@@ -13,11 +13,12 @@ import (
 )
 
 type Store struct {
-	mu    sync.Mutex
-	items []Result
-	limit int
-	seen  map[string]struct{}
-	file  *os.File
+	mu           sync.Mutex
+	items        []Result
+	limit        int
+	seen         map[string]struct{}
+	file         *os.File
+	writesFailed uint64
 }
 
 func NewStore(limit int) *Store {
@@ -108,6 +109,7 @@ func (s *Store) Add(r Result) (bool, error) {
 			return false, fmt.Errorf("encode diagnosis: %w", err)
 		}
 		if err := journal.AppendSynced(s.file, append(encoded, '\n')); err != nil {
+			s.writesFailed++
 			return false, fmt.Errorf("persist diagnosis: %w", err)
 		}
 	}
@@ -155,6 +157,18 @@ func (s *Store) Count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.items)
+}
+
+func (s *Store) Stats() (int, int64, uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var bytes int64
+	if s.file != nil {
+		if info, err := s.file.Stat(); err == nil {
+			bytes = info.Size()
+		}
+	}
+	return len(s.items), bytes, s.writesFailed
 }
 
 func (s *Store) Check() error {

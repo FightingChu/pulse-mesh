@@ -9,8 +9,10 @@ import (
 )
 
 const scanChunk = 4096
+const MaxJournalBytes = 256 * 1024 * 1024
 
 var appendLocks sync.Map
+var ErrCapacity = errors.New("journal capacity reached")
 
 type SyncFile interface {
 	Stat() (os.FileInfo, error)
@@ -68,6 +70,10 @@ func RepairIncompleteTail(file *os.File) (bool, error) {
 }
 
 func AppendSynced(file SyncFile, record []byte) error {
+	return AppendSyncedLimit(file, record, MaxJournalBytes)
+}
+
+func AppendSyncedLimit(file SyncFile, record []byte, maxBytes int64) error {
 	if regularFile, ok := file.(*os.File); ok {
 		lockValue, _ := appendLocks.LoadOrStore(regularFile.Name(), &sync.Mutex{})
 		lock := lockValue.(*sync.Mutex)
@@ -79,6 +85,9 @@ func AppendSynced(file SyncFile, record []byte) error {
 		return err
 	}
 	start := info.Size()
+	if maxBytes > 0 && start+int64(len(record)) > maxBytes {
+		return ErrCapacity
+	}
 	if _, err := file.Seek(0, io.SeekEnd); err != nil {
 		return err
 	}

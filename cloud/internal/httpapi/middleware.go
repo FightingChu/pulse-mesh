@@ -31,10 +31,23 @@ func (r *statusRecorder) Write(body []byte) (int, error) {
 type Metrics struct {
 	mu     sync.Mutex
 	counts map[string]int
+	stores map[string]storeMetric
+}
+
+type storeMetric struct {
+	records      int
+	bytes        int64
+	writesFailed uint64
 }
 
 func NewMetrics() *Metrics {
-	return &Metrics{counts: make(map[string]int)}
+	return &Metrics{counts: make(map[string]int), stores: make(map[string]storeMetric)}
+}
+
+func (m *Metrics) setStore(name string, records int, bytes int64, failures uint64) {
+	m.mu.Lock()
+	m.stores[name] = storeMetric{records: records, bytes: bytes, writesFailed: failures}
+	m.mu.Unlock()
 }
 
 func normalizePath(path string) string {
@@ -64,6 +77,10 @@ func (m *Metrics) Handler() http.Handler {
 			keys = append(keys, key)
 			snapshot[key] = value
 		}
+		stores := make(map[string]storeMetric, len(m.stores))
+		for name, metric := range m.stores {
+			stores[name] = metric
+		}
 		m.mu.Unlock()
 
 		sort.Strings(keys)
@@ -76,6 +93,15 @@ func (m *Metrics) Handler() http.Handler {
 			}
 			fmt.Fprintf(w, "pulse_http_requests_total{method=%q,path=%q,status=%q} %d\n",
 				parts[0], parts[1], parts[2], snapshot[key])
+		}
+		fmt.Fprintln(w, "# TYPE pulse_store_records gauge")
+		fmt.Fprintln(w, "# TYPE pulse_store_journal_bytes gauge")
+		fmt.Fprintln(w, "# TYPE pulse_store_write_failures_total counter")
+		for _, name := range []string{"samples", "diagnoses", "alerts"} {
+			metric := stores[name]
+			fmt.Fprintf(w, "pulse_store_records{store=%q} %d\n", name, metric.records)
+			fmt.Fprintf(w, "pulse_store_journal_bytes{store=%q} %d\n", name, metric.bytes)
+			fmt.Fprintf(w, "pulse_store_write_failures_total{store=%q} %d\n", name, metric.writesFailed)
 		}
 	})
 }

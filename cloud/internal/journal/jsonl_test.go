@@ -106,6 +106,22 @@ func TestConcurrentAppendsRemainWholeJSONLines(t *testing.T) {
 	}
 }
 
+func TestAppendSyncedRejectsCapacityWithoutWriting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := journal.AppendSyncedLimit(file, []byte("12345"), 4); !errors.Is(err, journal.ErrCapacity) {
+		t.Fatalf("append error = %v, want ErrCapacity", err)
+	}
+	info, err := file.Stat()
+	if err != nil || info.Size() != 0 {
+		t.Fatalf("size = %v, err=%v; want empty file", info.Size(), err)
+	}
+}
+
 func TestRepairIncompleteOnlyRecordTruncatesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	if err := os.WriteFile(path, []byte("{\"partial\":"), 0600); err != nil {
