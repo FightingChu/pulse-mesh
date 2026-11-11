@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import socket
 import sys
 import threading
 import unittest
@@ -93,6 +94,44 @@ class HTTPTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(req, timeout=10)
         self.assertEqual(ctx.exception.code, 400)
+
+    def test_post_spectrum_rejects_non_finite_values(self):
+        body = json.dumps({
+            "device_id": "motor-01",
+            "values": [float("nan")] + [0.0] * 1023,
+        }).encode()
+        req = urllib.request.Request(
+            self.base + "/spectrum",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_post_rejects_multiple_json_values(self):
+        req = urllib.request.Request(
+            self.base + "/assess",
+            data=b'{"values":[]} {}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_post_rejects_oversized_body(self):
+        address = self.server.server_address
+        with socket.create_connection(address, timeout=5) as client:
+            client.sendall(
+                b"POST /assess HTTP/1.1\r\n"
+                b"Host: 127.0.0.1\r\n"
+                b"Content-Length: 131073\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            response = client.recv(1024)
+        self.assertIn(b"413", response)
 
 
 if __name__ == "__main__":

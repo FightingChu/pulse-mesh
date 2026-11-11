@@ -38,10 +38,14 @@ func NewMetrics() *Metrics {
 }
 
 func normalizePath(path string) string {
+	switch path {
+	case "/health", "/metrics", "/api/v1/samples", "/api/v1/alerts", "/api/v1/diagnose", "/api/v1/diagnoses":
+		return path
+	}
 	if strings.HasPrefix(path, "/api/v1/alerts/") && strings.HasSuffix(path, "/ack") {
 		return "/api/v1/alerts/{id}/ack"
 	}
-	return path
+	return "unmatched"
 }
 
 func (m *Metrics) observe(method, path string, status int) {

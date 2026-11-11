@@ -33,6 +33,7 @@ func TestNormalizePathCollapsesAlertIDs(t *testing.T) {
 		"/health":                    "/health",
 		"/api/v1/alerts/alert-1/ack": "/api/v1/alerts/{id}/ack",
 		"/api/v1/alerts":             "/api/v1/alerts",
+		"/unbounded/attacker/path":   "unmatched",
 	}
 	for input, want := range cases {
 		if got := normalizePath(input); got != want {

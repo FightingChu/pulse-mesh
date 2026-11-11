@@ -3,7 +3,7 @@ use std::thread;
 use std::time::Duration;
 
 use pulse_edge::{
-    append_cache, diagnose_body, flush_cache, forward, forward_to, waveform, Sample,
+    append_cache, append_cache_to, diagnose_body, flush_cache, forward, forward_to, waveform, Sample,
     DEFAULT_ADDR, DEFAULT_CACHE, DIAGNOSE_PATH,
 };
 
@@ -50,6 +50,7 @@ fn main() {
     if forward_to(&addr, DIAGNOSE_PATH, &body) {
         println!("diagnose sent: {} points", values.len());
     } else {
+        append_cache_to(cache, DIAGNOSE_PATH, &body).expect("cache offline diagnosis");
         println!("diagnose failed: cloud unavailable");
     }
 }

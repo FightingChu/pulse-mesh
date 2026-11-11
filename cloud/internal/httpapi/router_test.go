@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,6 +109,42 @@ func TestPostRejectsMissingDevice(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestPostRejectsInvalidSampleFields(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	cases := []string{
+		`{"device_id":"motor-01","metric":"vibration_rms","value":1,"level":"urgent"}`,
+		`{"device_id":"motor-01","metric":"vibration_rms","value":NaN}`,
+		`{"device_id":"motor-01","metric":"vibration_rms","value":1} {}`,
+	}
+	for _, payload := range cases {
+		resp, err := http.Post(srv.URL+"/api/v1/samples", "application/json", strings.NewReader(payload))
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("payload %q status = %d, want 400", payload, resp.StatusCode)
+		}
+	}
+}
+
+func TestPostRejectsOversizedBody(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	payload := `{"device_id":"motor-01","metric":"vibration_rms","padding":"` + strings.Repeat("x", 128*1024) + `"}`
+	resp, err := http.Post(srv.URL+"/api/v1/samples", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
 	}
 }
 
@@ -259,6 +296,38 @@ func TestDiagnoseRejectsBadPayload(t *testing.T) {
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(`{"device_id":"motor-01"}`))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestDiagnoseRejectsWrongWaveformLength(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	payload, _ := json.Marshal(diagnose.Request{DeviceID: "motor-01", Values: make([]float64, 1023)})
+	resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestDiagnoseRejectsNonFiniteWaveform(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	values := make([]float64, 1024)
+	values[17] = math.Inf(1)
+	payload, _ := json.Marshal(diagnose.Request{DeviceID: "motor-01", Values: values})
+	resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(payload)))
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}

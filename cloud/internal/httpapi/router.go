@@ -2,6 +2,9 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"math"
 	"net/http"
 	"strings"
 
@@ -9,6 +12,9 @@ import (
 	"pulse-mesh/cloud/internal/diagnose"
 	"pulse-mesh/cloud/internal/ingest"
 )
+
+const maxJSONBody = 128 * 1024
+const maxWaveformValues = 1024
 
 func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagnoses *diagnose.Store) http.Handler {
 	metrics := NewMetrics()
@@ -23,12 +29,16 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		switch r.Method {
 		case http.MethodPost:
 			var s ingest.Sample
-			if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			if err := decodeJSON(w, r, &s); err != nil {
+				writeDecodeError(w, err)
 				return
 			}
 			if s.DeviceID == "" || s.Metric == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "device_id and metric are required"})
+				return
+			}
+			if !finite(s.Value) || !finite(s.TempC) || (s.Level != "" && s.Level != "normal" && s.Level != "warning" && s.Level != "critical") {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample values or level"})
 				return
 			}
 			store.Add(s)
@@ -80,13 +90,27 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			return
 		}
 		var req diagnose.Request
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		if err := decodeJSON(w, r, &req); err != nil {
+			writeDecodeError(w, err)
 			return
 		}
 		if req.DeviceID == "" || len(req.Values) == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "device_id and values are required"})
 			return
+		}
+		if len(req.Values) != maxWaveformValues {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "values must contain exactly 1024 samples"})
+			return
+		}
+		if !finite(req.SampleRateHz) || !finite(req.RotationHz) || req.SampleRateHz < 2*req.RotationHz || req.RotationHz < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample_rate_hz or rotation_hz"})
+			return
+		}
+		for _, value := range req.Values {
+			if !finite(value) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "waveform values must be finite numbers"})
+				return
+			}
 		}
 		if req.SampleRateHz <= 0 {
 			req.SampleRateHz = 1000
@@ -124,4 +148,33 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("request must contain a single JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func writeDecodeError(w http.ResponseWriter, err error) {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+}
+
+func finite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
