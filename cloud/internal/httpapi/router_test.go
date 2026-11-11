@@ -9,16 +9,42 @@ import (
 	"time"
 
 	"pulse-mesh/cloud/internal/alerts"
+	"pulse-mesh/cloud/internal/diagnose"
 	"pulse-mesh/cloud/internal/httpapi"
 	"pulse-mesh/cloud/internal/ingest"
 )
 
-func newTestServer() *httptest.Server {
-	return httptest.NewServer(httpapi.New(ingest.NewStore(), alerts.New(time.Minute)))
+func newTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	ai := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req diagnose.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, diagnose.Result{
+			DeviceID:   req.DeviceID,
+			DominantHz: 120,
+			HighBand:   0.9,
+			Fault:      "bearing_wear",
+		})
+	}))
+	t.Cleanup(ai.Close)
+	return httptest.NewServer(httpapi.New(
+		ingest.NewStore(),
+		alerts.New(time.Minute),
+		diagnose.NewClient(ai.URL),
+		diagnose.NewStore(10),
+	))
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func TestHealth(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health")
@@ -40,7 +66,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestPostThenList(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	defer srv.Close()
 
 	payload := `{"device_id":"motor-01","metric":"vibration_rms","value":4.8}`
@@ -72,7 +98,7 @@ func TestPostThenList(t *testing.T) {
 }
 
 func TestPostRejectsMissingDevice(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/api/v1/samples", "application/json", strings.NewReader(`{"value":1}`))
@@ -86,7 +112,7 @@ func TestPostRejectsMissingDevice(t *testing.T) {
 }
 
 func TestRejectsUnknownMethod(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	defer srv.Close()
 
 	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/v1/samples", nil)
@@ -104,7 +130,7 @@ func TestRejectsUnknownMethod(t *testing.T) {
 }
 
 func TestCriticalSampleCreatesAlertAndAck(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	defer srv.Close()
 
 	payload := `{"device_id":"motor-01","metric":"vibration_rms","value":4.8,"level":"critical"}`
@@ -170,5 +196,99 @@ func TestCriticalSampleCreatesAlertAndAck(t *testing.T) {
 	}
 	if len(withAcked) != 1 || !withAcked[0].Acked {
 		t.Fatalf("expected one acked alert, got %+v", withAcked)
+	}
+}
+
+func TestDiagnoseStoresResultAndRaisesAlert(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	values := make([]float64, 1024)
+	payload, err := json.Marshal(diagnose.Request{
+		DeviceID:     "motor-01",
+		Values:       values,
+		SampleRateHz: 1000,
+		RotationHz:   25,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatalf("diagnose: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body struct {
+		Diagnosis diagnose.Result `json:"diagnosis"`
+		Alert     *alerts.Alert   `json:"alert"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Diagnosis.Fault != "bearing_wear" {
+		t.Fatalf("fault = %q, want bearing_wear", body.Diagnosis.Fault)
+	}
+	if body.Alert == nil || body.Alert.Level != "critical" {
+		t.Fatalf("expected critical alert, got %+v", body.Alert)
+	}
+	if body.Alert.Metric != "fault:bearing_wear" {
+		t.Fatalf("metric = %q", body.Alert.Metric)
+	}
+
+	resp, err = http.Get(srv.URL + "/api/v1/diagnoses?device=motor-01")
+	if err != nil {
+		t.Fatalf("list diagnoses: %v", err)
+	}
+	defer resp.Body.Close()
+	var stored []diagnose.Result
+	if err := json.NewDecoder(resp.Body).Decode(&stored); err != nil {
+		t.Fatalf("decode diagnoses: %v", err)
+	}
+	if len(stored) != 1 || stored[0].Fault != "bearing_wear" {
+		t.Fatalf("unexpected stored diagnoses: %+v", stored)
+	}
+}
+
+func TestDiagnoseRejectsBadPayload(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(`{"device_id":"motor-01"}`))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestDiagnoseReturnsBadGatewayWhenAIDown(t *testing.T) {
+	deadAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := deadAI.URL
+	deadAI.Close()
+
+	srv := httptest.NewServer(httpapi.New(
+		ingest.NewStore(),
+		alerts.New(time.Minute),
+		diagnose.NewClient(deadURL),
+		diagnose.NewStore(10),
+	))
+	defer srv.Close()
+
+	values := make([]float64, 1024)
+	payload, _ := json.Marshal(diagnose.Request{DeviceID: "motor-01", Values: values})
+	resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
 	}
 }

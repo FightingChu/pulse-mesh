@@ -6,10 +6,11 @@ import (
 	"strings"
 
 	"pulse-mesh/cloud/internal/alerts"
+	"pulse-mesh/cloud/internal/diagnose"
 	"pulse-mesh/cloud/internal/ingest"
 )
 
-func New(store *ingest.Store, engine *alerts.Engine) http.Handler {
+func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagnoses *diagnose.Store) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +69,50 @@ func New(store *ingest.Store, engine *alerts.Engine) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "acked", "id": id})
+	})
+
+	mux.HandleFunc("/api/v1/diagnose", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		var req diagnose.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if req.DeviceID == "" || len(req.Values) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "device_id and values are required"})
+			return
+		}
+		if req.SampleRateHz <= 0 {
+			req.SampleRateHz = 1000
+		}
+		if req.RotationHz <= 0 {
+			req.RotationHz = 25
+		}
+
+		result, err := ai.Diagnose(r.Context(), req)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		diagnoses.Add(result)
+		alert := engine.EvaluateFault(result.DeviceID, result.Fault)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"diagnosis": result,
+			"alert":     alert,
+		})
+	})
+
+	mux.HandleFunc("/api/v1/diagnoses", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, diagnoses.List(r.URL.Query().Get("device"), 100))
 	})
 
 	return mux

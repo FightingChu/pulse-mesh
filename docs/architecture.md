@@ -24,6 +24,18 @@ Hann 窗相干增益为 0.5，峰值幅度按 4/N 归一化补偿。
 云端收到 warning / critical 样本时生成告警，按 device_id + metric + level 在 5 分钟窗口内去重。
 GET /api/v1/alerts?device=motor-01&include_acked=1 查询，POST /api/v1/alerts/{id}/ack 确认。
 
+# 诊断链路
+
+网关把一窗原始波形发到云端 POST /api/v1/diagnose，云端转发给 AI 的 POST /spectrum，
+拿回主频、频带能量和故障类型，落库后按故障等级自动生成告警：
+
+- bearing_wear / misalignment -> critical
+- imbalance / looseness -> warning
+- normal -> 不告警
+
+云端故障告警的 metric 写成 fault:<type>，所以不同故障不会被同一条去重键吃掉。
+GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_URL 覆盖，默认 http://127.0.0.1:8000。
+
 # 判据
 
 历史窗口不含当前值，至少 3 个点，标准差下限 1e-6，避免单点尖峰把阈值自己撑大。

@@ -44,8 +44,32 @@ func (e *Engine) Evaluate(s ingest.Sample) *Alert {
 	if s.Level != "warning" && s.Level != "critical" {
 		return nil
 	}
+	message := fmt.Sprintf("%s on %s is %s (%.2f)", s.Metric, s.DeviceID, s.Level, s.Value)
+	return e.raise(s.DeviceID, s.Metric, s.Level, s.Value, message)
+}
 
-	key := s.DeviceID + "|" + s.Metric + "|" + s.Level
+func FaultLevel(fault string) string {
+	switch fault {
+	case "bearing_wear", "misalignment":
+		return "critical"
+	case "imbalance", "looseness":
+		return "warning"
+	default:
+		return ""
+	}
+}
+
+func (e *Engine) EvaluateFault(deviceID, fault string) *Alert {
+	level := FaultLevel(fault)
+	if level == "" {
+		return nil
+	}
+	message := fmt.Sprintf("%s detected on %s", fault, deviceID)
+	return e.raise(deviceID, "fault:"+fault, level, 0, message)
+}
+
+func (e *Engine) raise(deviceID, metric, level string, value float64, message string) *Alert {
+	key := deviceID + "|" + metric + "|" + level
 	now := time.Now().UTC()
 
 	e.mu.Lock()
@@ -59,11 +83,11 @@ func (e *Engine) Evaluate(s ingest.Sample) *Alert {
 	e.seq++
 	alert := Alert{
 		ID:        fmt.Sprintf("alert-%d", e.seq),
-		DeviceID:  s.DeviceID,
-		Metric:    s.Metric,
-		Level:     s.Level,
-		Value:     s.Value,
-		Message:   fmt.Sprintf("%s on %s is %s (%.2f)", s.Metric, s.DeviceID, s.Level, s.Value),
+		DeviceID:  deviceID,
+		Metric:    metric,
+		Level:     level,
+		Value:     value,
+		Message:   message,
 		CreatedAt: now,
 	}
 	e.items = append(e.items, alert)

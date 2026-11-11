@@ -47,6 +47,13 @@ curl "http://127.0.0.1:8080/api/v1/alerts?device=motor-01"
 curl -X POST http://127.0.0.1:8080/api/v1/alerts/alert-1/ack
 ```
 
+云端诊断（转发 AI 并自动告警）：
+```
+curl -X POST http://127.0.0.1:8080/api/v1/diagnose -H "Content-Type: application/json" \
+  -d '{"device_id":"motor-01","values":[1024 个采样点],"sample_rate_hz":1000,"rotation_hz":25}'
+curl "http://127.0.0.1:8080/api/v1/diagnoses?device=motor-01"
+```
+
 验证：
 ```
 pwsh tools/verify.ps1
@@ -75,7 +82,7 @@ curl "http://127.0.0.1:8080/api/v1/samples?device=motor-01"
 
 ## 验证状态
 
-- 已跑通：Go 18 个测试、Python 19 个测试、Rust 4 个测试、C++ 固件 CTest、云端+网关端到端与离线回放
+- 已跑通：Go 24 个测试、Python 19 个测试、Rust 4 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、云端诊断转 AI 并自动告警
 - 未验证：Flutter（本机未装）、Docker / K8s 部署（本机无 Docker）
 
 工具链安装见 `docs/dev-setup.md`。中文路径会让 MinGW / Rust 链接器读不到文件，用 ASCII junction 构建。
