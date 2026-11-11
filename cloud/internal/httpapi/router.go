@@ -117,7 +117,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		writeJSON(w, http.StatusOK, diagnoses.List(r.URL.Query().Get("device"), 100))
 	})
 
-	return withCORS(withLogging(metrics, mux))
+	return withCORS(withLogging(metrics, withRecovery(mux)))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

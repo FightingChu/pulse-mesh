@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -97,6 +98,18 @@ func withCORS(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func withRecovery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Printf("panic %s %s: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			}
+		}()
 		next.ServeHTTP(w, r)
 	})
 }

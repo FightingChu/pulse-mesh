@@ -16,10 +16,18 @@ import (
 )
 
 func main() {
-	addr := ":8080"
+	addr := envOr("PULSE_ADDR", ":8080")
 	aiURL := os.Getenv("PULSE_AI_URL")
 	if aiURL == "" {
 		aiURL = "http://127.0.0.1:8000"
+	}
+	alertWindow := 5 * time.Minute
+	if raw := os.Getenv("PULSE_ALERT_WINDOW"); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil {
+			log.Fatalf("invalid PULSE_ALERT_WINDOW %q: %v", raw, err)
+		}
+		alertWindow = parsed
 	}
 	srv := &http.Server{
 		Addr:              addr,
@@ -29,7 +37,7 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		Handler: httpapi.New(
 			ingest.NewStore(),
-			alerts.New(5*time.Minute),
+			alerts.New(alertWindow),
 			diagnose.NewClient(aiURL),
 			diagnose.NewStore(1000),
 		),
@@ -52,4 +60,11 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+func envOr(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
