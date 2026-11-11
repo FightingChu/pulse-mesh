@@ -75,6 +75,24 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestHealthReadinessAndLiveness(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+	for path, want := range map[string]int{
+		"/health/live":  http.StatusOK,
+		"/health/ready": http.StatusOK,
+	} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("%s status = %d, want %d", path, resp.StatusCode, want)
+		}
+	}
+}
+
 func TestPostThenList(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()

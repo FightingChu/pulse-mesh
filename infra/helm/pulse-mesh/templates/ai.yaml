@@ -22,7 +22,7 @@ spec:
             - containerPort: 8000
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: 8000
             initialDelaySeconds: 2
             periodSeconds: 10

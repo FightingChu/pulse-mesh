@@ -157,6 +157,18 @@ func (s *Store) Count() int {
 	return len(s.items)
 }
 
+func (s *Store) Check() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.file == nil {
+		return nil
+	}
+	if _, err := s.file.Stat(); err != nil {
+		return err
+	}
+	return s.file.Sync()
+}
+
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

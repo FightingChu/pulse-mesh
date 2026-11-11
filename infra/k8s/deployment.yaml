@@ -20,7 +20,8 @@ spec:
         volumeMounts:
         - name: pulse-data
           mountPath: /var/lib/pulse-mesh
-        readinessProbe: {httpGet: {path: /health, port: 8080}}
+        readinessProbe: {httpGet: {path: /health/ready, port: 8080}}
+        livenessProbe: {httpGet: {path: /health/live, port: 8080}}
       volumes:
       - name: pulse-data
         persistentVolumeClaim: {claimName: pulse-cloud-data}
@@ -45,7 +46,7 @@ spec:
       - name: ai
         image: pulse-mesh/ai:0.1.0
         ports: [{containerPort: 8000}]
-        readinessProbe: {httpGet: {path: /health, port: 8000}}
+        readinessProbe: {httpGet: {path: /health/live, port: 8000}}
 ---
 apiVersion: v1
 kind: Service

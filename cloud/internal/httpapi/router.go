@@ -26,6 +26,23 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("/health/live", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, r *http.Request) {
+		checks := map[string]error{
+			"samples":   store.Check(),
+			"diagnoses": diagnoses.Check(),
+			"alerts":    engine.Check(),
+		}
+		for name, err := range checks {
+			if err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "store": name})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	})
 
 	mux.HandleFunc("/api/v1/samples", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

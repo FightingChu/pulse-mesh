@@ -55,6 +55,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - 未设置 PULSE_DATA_DIR 时使用纯内存模式，适合本地快速开发。
 - AI 连续 3 次发生网络、超时或 5xx 错误后熔断 15 秒，冷却后仅允许一个探测请求；AI 的 4xx 输入错误不计入熔断。
 - 云端同时最多运行 4 个频谱诊断请求，超额返回 429 和 Retry-After，避免波形计算与等待 AI 无界堆积。
+- `/health/live` 只报告进程存活；`/health/ready` 检查样本、诊断、告警存储可用性。Kubernetes 分别用作 liveness 和 readiness probe。
 
 # 判据
 

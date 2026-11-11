@@ -142,6 +142,18 @@ func (s *Store) List(device string, n int) []Sample {
 
 func (s *Store) Count() int { s.mu.Lock(); defer s.mu.Unlock(); return len(s.items) }
 
+func (s *Store) Check() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.file == nil {
+		return nil
+	}
+	if _, err := s.file.Stat(); err != nil {
+		return err
+	}
+	return s.file.Sync()
+}
+
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

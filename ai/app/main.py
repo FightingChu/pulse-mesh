@@ -54,7 +54,7 @@ def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0, event_i
 
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
-        if urlparse(self.path).path == '/health':
+        if urlparse(self.path).path in ('/health', '/health/live'):
             self._send({'status': 'ok'})
         else:
             self._send(assess('motor-01', 'vibration_rms', [1.1, 1.2, 1.0, 1.3, 1.2, 4.8]))

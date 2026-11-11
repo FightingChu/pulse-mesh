@@ -277,3 +277,15 @@ func (e *Engine) Close() error {
 	}
 	return e.file.Close()
 }
+
+func (e *Engine) Check() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.file == nil {
+		return nil
+	}
+	if _, err := e.file.Stat(); err != nil {
+		return err
+	}
+	return e.file.Sync()
+}
