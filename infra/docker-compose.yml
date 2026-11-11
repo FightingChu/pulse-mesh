@@ -1,6 +1,10 @@
 services:
   cloud:
     build: ../cloud
+    environment:
+      PULSE_AI_URL: http://ai:8000
+    depends_on:
+      - ai
     ports: ["8080:8080"]
   ai:
     image: python:3.14-slim

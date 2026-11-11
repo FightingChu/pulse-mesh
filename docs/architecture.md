@@ -26,7 +26,7 @@ GET /api/v1/alerts?device=motor-01&include_acked=1 查询，POST /api/v1/alerts/
 
 # 诊断链路
 
-网关把一窗原始波形发到云端 POST /api/v1/diagnose，云端转发给 AI 的 POST /spectrum，
+网关（Rust）先按 1 kHz 采 1024 点波形，发到云端 POST /api/v1/diagnose，云端转发给 AI 的 POST /spectrum，
 拿回主频、频带能量和故障类型，落库后按故障等级自动生成告警：
 
 - bearing_wear / misalignment -> critical

@@ -5,6 +5,8 @@ use std::path::Path;
 
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8080";
 pub const DEFAULT_CACHE: &str = "cache.jsonl";
+pub const SAMPLE_PATH: &str = "/api/v1/samples";
+pub const DIAGNOSE_PATH: &str = "/api/v1/diagnose";
 
 pub struct Sample<'a> {
     pub device_id: &'a str,
@@ -24,8 +26,13 @@ impl Sample<'_> {
 }
 
 pub fn forward(addr: &str, body: &str) -> bool {
+    forward_to(addr, SAMPLE_PATH, body)
+}
+
+pub fn forward_to(addr: &str, path: &str, body: &str) -> bool {
     let request = format!(
-        "POST /api/v1/samples HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path,
         addr,
         body.len(),
         body
@@ -40,6 +47,35 @@ pub fn forward(addr: &str, body: &str) -> bool {
         }
         Err(_) => false,
     }
+}
+
+pub fn waveform(rotation_hz: f64, bearing_amplitude: f64, n: usize, sample_rate_hz: f64) -> Vec<f64> {
+    let two_pi = std::f64::consts::TAU;
+    (0..n)
+        .map(|i| {
+            let t = i as f64 / sample_rate_hz;
+            let fundamental = (two_pi * rotation_hz * t).sin();
+            let harmonic = 0.15 * (two_pi * 2.0 * rotation_hz * t).sin();
+            let bearing = bearing_amplitude * (two_pi * 120.0 * t).sin();
+            fundamental + harmonic + bearing
+        })
+        .collect()
+}
+
+pub fn diagnose_body(
+    device_id: &str,
+    values: &[f64],
+    sample_rate_hz: f64,
+    rotation_hz: f64,
+) -> String {
+    let encoded: Vec<String> = values.iter().map(|v| format!("{:.4}", v)).collect();
+    format!(
+        "{{\"device_id\":\"{}\",\"values\":[{}],\"sample_rate_hz\":{},\"rotation_hz\":{}}}",
+        device_id,
+        encoded.join(","),
+        sample_rate_hz,
+        rotation_hz
+    )
 }
 
 pub fn append_cache(path: &Path, body: &str) -> io::Result<()> {
@@ -131,5 +167,42 @@ mod tests {
         let kept = fs::read_to_string(&path).unwrap();
         assert!(kept.contains("{\"a\":1}"));
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn waveform_has_expected_shape() {
+        let samples = waveform(25.0, 0.6, 1024, 1000.0);
+        assert_eq!(samples.len(), 1024);
+        let peak = samples.iter().cloned().fold(f64::MIN, f64::max);
+        assert!(peak > 1.0 && peak < 3.0, "peak = {}", peak);
+    }
+
+    #[test]
+    fn diagnose_body_encodes_all_values() {
+        let body = diagnose_body("motor-01", &[0.0, 0.5, -0.5], 1000.0, 25.0);
+        assert!(body.starts_with("{\"device_id\":\"motor-01\",\"values\":["));
+        assert!(body.contains("0.0000,0.5000,-0.5000"));
+        assert!(body.ends_with("],\"sample_rate_hz\":1000,\"rotation_hz\":25}"));
+    }
+
+    #[test]
+    fn forward_to_uses_requested_path() {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 512];
+            let n = stream.read(&mut buf).unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").unwrap();
+            String::from_utf8_lossy(&buf[..n]).to_string()
+        });
+
+        assert!(forward_to(&addr, DIAGNOSE_PATH, "{\"a\":1}"));
+        let request = handle.join().unwrap();
+        assert!(request.starts_with("POST /api/v1/diagnose HTTP/1.1"), "{}", request);
     }
 }

@@ -2,7 +2,10 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use pulse_edge::{append_cache, flush_cache, forward, Sample, DEFAULT_ADDR, DEFAULT_CACHE};
+use pulse_edge::{
+    append_cache, diagnose_body, flush_cache, forward, forward_to, waveform, Sample,
+    DEFAULT_ADDR, DEFAULT_CACHE, DIAGNOSE_PATH,
+};
 
 fn level_of(value: f64) -> &'static str {
     if value > 4.0 {
@@ -40,5 +43,13 @@ fn main() {
             println!("offline cached tick={} value={:.2}", tick, value);
         }
         thread::sleep(Duration::from_millis(200));
+    }
+
+    let values = waveform(25.0, 0.6, 1024, 1000.0);
+    let body = diagnose_body("motor-01", &values, 1000.0, 25.0);
+    if forward_to(&addr, DIAGNOSE_PATH, &body) {
+        println!("diagnose sent: {} points", values.len());
+    } else {
+        println!("diagnose failed: cloud unavailable");
     }
 }

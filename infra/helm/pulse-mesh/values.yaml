@@ -5,6 +5,13 @@ image:
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
+ai:
+  replicaCount: 1
+  image:
+    repository: pulse-mesh/ai
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
 service:
   type: ClusterIP
   port: 80

@@ -11,6 +11,9 @@ spec:
       - name: cloud
         image: pulse-mesh/cloud:0.1.0
         ports: [{containerPort: 8080}]
+        env:
+        - name: PULSE_AI_URL
+          value: http://pulse-ai:8000
         readinessProbe: {httpGet: {path: /health, port: 8080}}
 ---
 apiVersion: v1
@@ -19,3 +22,25 @@ metadata: {name: pulse-cloud}
 spec:
   selector: {app: pulse-cloud}
   ports: [{port: 80, targetPort: 8080}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: pulse-ai}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: pulse-ai}}
+  template:
+    metadata: {labels: {app: pulse-ai}}
+    spec:
+      containers:
+      - name: ai
+        image: pulse-mesh/ai:0.1.0
+        ports: [{containerPort: 8000}]
+        readinessProbe: {httpGet: {path: /health, port: 8000}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: pulse-ai}
+spec:
+  selector: {app: pulse-ai}
+  ports: [{port: 8000, targetPort: 8000}]

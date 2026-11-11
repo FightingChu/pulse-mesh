@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ai
+  labels:
+    app: {{ .Release.Name }}-ai
+spec:
+  replicas: {{ .Values.ai.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-ai
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-ai
+    spec:
+      containers:
+        - name: ai
+          image: "{{ .Values.ai.image.repository }}:{{ .Values.ai.image.tag }}"
+          imagePullPolicy: {{ .Values.ai.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ai
+spec:
+  selector:
+    app: {{ .Release.Name }}-ai
+  ports:
+    - port: 8000
+      targetPort: 8000

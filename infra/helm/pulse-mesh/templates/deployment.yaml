@@ -20,6 +20,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
+          env:
+            - name: PULSE_AI_URL
+              value: "http://{{ .Release.Name }}-ai:8000"
           readinessProbe:
             httpGet:
               path: /health
