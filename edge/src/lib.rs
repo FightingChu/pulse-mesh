@@ -35,11 +35,14 @@ impl EdgeConfig {
         let device_id = get("PULSE_EDGE_DEVICE_ID").unwrap_or_else(|| "motor-01".to_string());
         if device_id.is_empty()
             || device_id.len() > 64
-            || !device_id.bytes().all(|byte| {
-                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
-            })
+            || !device_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
         {
-            return Err("PULSE_EDGE_DEVICE_ID must be 1-64 ASCII letters, digits, dot, dash or underscore".to_string());
+            return Err(
+                "PULSE_EDGE_DEVICE_ID must be 1-64 ASCII letters, digits, dot, dash or underscore"
+                    .to_string(),
+            );
         }
 
         let sample_count = parse_env(&mut get, "PULSE_SAMPLE_COUNT", 10usize)?;
@@ -62,7 +65,10 @@ impl EdgeConfig {
             || sample_rate_hz < 2.0 * rotation_hz
             || bearing_amplitude < 0.0
         {
-            return Err("sampling rate must be at least 240 Hz; frequencies and amplitude must be finite and non-negative".to_string());
+            return Err(
+                "sampling rate must be at least 240 Hz; frequencies and amplitude must be finite and non-negative"
+                    .to_string(),
+            );
         }
 
         Ok(Self {
@@ -181,12 +187,20 @@ fn read_http_success(stream: &mut TcpStream) -> bool {
     };
     let mut parts = status_line.split_whitespace();
     matches!(
-        (parts.next(), parts.next().and_then(|code| code.parse::<u16>().ok())),
+        (
+            parts.next(),
+            parts.next().and_then(|code| code.parse::<u16>().ok()),
+        ),
         (Some("HTTP/1.1" | "HTTP/1.0"), Some(200..=299))
     )
 }
 
-pub fn waveform(rotation_hz: f64, bearing_amplitude: f64, n: usize, sample_rate_hz: f64) -> Vec<f64> {
+pub fn waveform(
+    rotation_hz: f64,
+    bearing_amplitude: f64,
+    n: usize,
+    sample_rate_hz: f64,
+) -> Vec<f64> {
     if !rotation_hz.is_finite()
         || !bearing_amplitude.is_finite()
         || !sample_rate_hz.is_finite()
@@ -238,15 +252,24 @@ pub fn append_cache(path: &Path, body: &str) -> io::Result<()> {
 
 pub fn append_cache_to(path: &Path, route: &str, body: &str) -> io::Result<()> {
     if route != SAMPLE_PATH && route != BATCH_PATH && route != DIAGNOSE_PATH {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "unsupported cache route"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "unsupported cache route",
+        ));
     }
     if body.len() > MAX_RECORD_BYTES || body.contains(['\r', '\n']) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid or oversized cache record"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid or oversized cache record",
+        ));
     }
     let current_size = path.metadata().map(|meta| meta.len()).unwrap_or(0);
     let record_size = route.len() as u64 + body.len() as u64 + 2;
     if current_size.saturating_add(record_size) > MAX_CACHE_BYTES {
-        return Err(io::Error::new(io::ErrorKind::WriteZero, "offline cache limit reached"));
+        return Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "offline cache limit reached",
+        ));
     }
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     writeln!(file, "{}\t{}", route, body)?;
@@ -273,9 +296,7 @@ pub fn flush_cache(addr: &str, path: &Path) -> usize {
     }
     let mut sent = 0;
     for line in &lines {
-        let (route, body) = line
-            .split_once('\t')
-            .unwrap_or((SAMPLE_PATH, *line));
+        let (route, body) = line.split_once('\t').unwrap_or((SAMPLE_PATH, *line));
         if body.len() > MAX_RECORD_BYTES
             || (route != SAMPLE_PATH && route != BATCH_PATH && route != DIAGNOSE_PATH)
         {
@@ -421,7 +442,9 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut buf = [0u8; 512];
             let _ = stream.read(&mut buf).unwrap();
-            stream.write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n").unwrap();
+            stream
+                .write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
         });
 
         let path = temp_path("flush-success");
@@ -441,7 +464,9 @@ mod tests {
         let addr = listener.local_addr().unwrap().to_string();
         let handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n").unwrap();
+            stream
+                .write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
         });
         assert!(!forward_to(&addr, SAMPLE_PATH, "{}"));
         handle.join().unwrap();
@@ -459,7 +484,9 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut buf = [0u8; 1024];
             let n = stream.read(&mut buf).unwrap();
-            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
             String::from_utf8_lossy(&buf[..n]).to_string()
         });
 
@@ -486,8 +513,16 @@ mod tests {
 
     #[test]
     fn diagnose_body_encodes_all_values() {
-        let body = diagnose_body("boot-123-spectrum-0", "motor-01", &[0.0, 0.5, -0.5], 1000.0, 25.0);
-        assert!(body.starts_with("{\"event_id\":\"boot-123-spectrum-0\",\"device_id\":\"motor-01\",\"values\":["));
+        let body = diagnose_body(
+            "boot-123-spectrum-0",
+            "motor-01",
+            &[0.0, 0.5, -0.5],
+            1000.0,
+            25.0,
+        );
+        assert!(body.starts_with(
+            "{\"event_id\":\"boot-123-spectrum-0\",\"device_id\":\"motor-01\",\"values\":["
+        ));
         assert!(body.contains("0.0000,0.5000,-0.5000"));
         assert!(body.ends_with("],\"sample_rate_hz\":1000,\"rotation_hz\":25}"));
     }
@@ -529,13 +564,19 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut buf = [0u8; 512];
             let n = stream.read(&mut buf).unwrap();
-            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
             String::from_utf8_lossy(&buf[..n]).to_string()
         });
 
         assert!(forward_to(&addr, DIAGNOSE_PATH, "{\"a\":1}"));
         let request = handle.join().unwrap();
-        assert!(request.starts_with("POST /api/v1/diagnose HTTP/1.1"), "{}", request);
+        assert!(
+            request.starts_with("POST /api/v1/diagnose HTTP/1.1"),
+            "{}",
+            request
+        );
     }
 
     #[test]

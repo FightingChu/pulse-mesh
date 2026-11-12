@@ -32,7 +32,11 @@ fn main() {
 
     let mut samples = Vec::with_capacity(config.sample_count);
     for tick in 0..config.sample_count {
-        let value = if tick == config.sample_count * 7 / 10 { 4.8 } else { 1.2 };
+        let value = if tick == config.sample_count * 7 / 10 {
+            4.8
+        } else {
+            1.2
+        };
         let event_id = format!("{session_id}-sample-{tick}");
         samples.push(OwnedSample {
             event_id,
@@ -78,8 +82,13 @@ fn main() {
 
 fn session_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    format!("{}-{}-{}", std::process::id(), std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_nanos())
-        .unwrap_or_default(), COUNTER.fetch_add(1, Ordering::Relaxed))
+    format!(
+        "{}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
 }
