@@ -102,10 +102,10 @@ func (e *Engine) load(file *os.File) error {
 			if record.Alert == nil {
 				return fmt.Errorf("alert create record has no alert")
 			}
-			e.addMemory(*record.Alert)
 			if record.SeenKey != "" && record.SeenAt != nil {
 				e.seen[record.SeenKey] = *record.SeenAt
 			}
+			e.addMemory(*record.Alert)
 		case "ack":
 			e.ackMemory(record.ID, record.AckedAt())
 		default:
@@ -132,6 +132,11 @@ func (e *Engine) addMemory(alert Alert) {
 		e.seq = number
 	}
 	if len(e.items) > e.maxKeep {
+		removed := e.items[0]
+		key := removed.DeviceID + "|" + removed.Metric + "|" + removed.Level
+		if seenAt, ok := e.seen[key]; ok && seenAt.Equal(removed.CreatedAt) {
+			delete(e.seen, key)
+		}
 		e.items = e.items[len(e.items)-e.maxKeep:]
 	}
 }

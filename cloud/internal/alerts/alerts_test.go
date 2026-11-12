@@ -1,6 +1,7 @@
 package alerts_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -162,4 +163,26 @@ func TestFailedJournalWriteDoesNotConsumeAlert(t *testing.T) {
 	if err != nil || alert == nil || alert.ID != "alert-1" {
 		t.Fatalf("retry after restart = %+v, %v", alert, err)
 	}
+}
+
+func TestSeenIndexIsBoundedByAlertRetention(t *testing.T) {
+	engine := alerts.New(time.Hour)
+	for index := 0; index < 1100; index++ {
+		device := fmt.Sprintf("motor-%04d", index)
+		if alert := engine.Evaluate(sampleForDevice(device, "critical")); alert == nil {
+			t.Fatalf("alert %d was unexpectedly deduplicated", index)
+		}
+	}
+	if got := len(engine.List("", true)); got != 1000 {
+		t.Fatalf("retained alerts = %d, want 1000", got)
+	}
+	if alert := engine.Evaluate(sampleForDevice("motor-0000", "critical")); alert == nil {
+		t.Fatal("event older than the bounded retention window should no longer be deduplicated")
+	}
+}
+
+func sampleForDevice(deviceID, level string) ingest.Sample {
+	s := sample(level)
+	s.DeviceID = deviceID
+	return s
 }
