@@ -27,8 +27,20 @@ spec:
             httpGet:
               path: /health/live
               port: 8000
-            initialDelaySeconds: 2
             periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            failureThreshold: 12
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.ai.resources | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service

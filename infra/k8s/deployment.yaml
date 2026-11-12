@@ -54,7 +54,19 @@ spec:
         env:
         - name: PULSE_AI_MAX_WORKERS
           value: "8"
-        readinessProbe: {httpGet: {path: /health/live, port: 8000}}
+        startupProbe:
+          httpGet: {path: /health/live, port: 8000}
+          failureThreshold: 12
+          periodSeconds: 5
+        livenessProbe:
+          httpGet: {path: /health/live, port: 8000}
+          periodSeconds: 20
+        readinessProbe:
+          httpGet: {path: /health/live, port: 8000}
+          periodSeconds: 10
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {cpu: 1000m, memory: 512Mi}
 ---
 apiVersion: v1
 kind: Service
