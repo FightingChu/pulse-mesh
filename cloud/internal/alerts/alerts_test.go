@@ -206,6 +206,55 @@ func TestEventIDDedupRestoresAfterRestart(t *testing.T) {
 	}
 }
 
+func TestWindowSuppressedEventRemainsDeduplicatedAfterWindow(t *testing.T) {
+	engine := alerts.New(5 * time.Millisecond)
+	first := sampleForDevice("motor-01", "critical")
+	first.EventID = "boot-1-sample-1"
+	if alert := engine.Evaluate(first); alert == nil {
+		t.Fatal("first event should raise alert")
+	}
+	suppressed := sampleForDevice("motor-01", "critical")
+	suppressed.EventID = "boot-1-sample-2"
+	if alert := engine.Evaluate(suppressed); alert != nil {
+		t.Fatal("second event should be suppressed by time window")
+	}
+	time.Sleep(10 * time.Millisecond)
+	if alert := engine.Evaluate(suppressed); alert != nil {
+		t.Fatal("retry of suppressed source event must remain deduplicated")
+	}
+}
+
+func TestWindowSuppressedEventDedupRestoresFromJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.jsonl")
+	firstEngine, err := alerts.OpenStore(path, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := sampleForDevice("motor-01", "critical")
+	first.EventID = "boot-1-sample-1"
+	if alert, err := firstEngine.EvaluateWithError(first); err != nil || alert == nil {
+		t.Fatalf("first alert = %+v, %v", alert, err)
+	}
+	suppressed := sampleForDevice("motor-01", "critical")
+	suppressed.EventID = "boot-1-sample-2"
+	if alert, err := firstEngine.EvaluateWithError(suppressed); err != nil || alert != nil {
+		t.Fatalf("suppressed event = %+v, %v", alert, err)
+	}
+	if err := firstEngine.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	secondEngine, err := alerts.OpenStore(path, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondEngine.Close()
+	time.Sleep(time.Millisecond)
+	if alert, err := secondEngine.EvaluateWithError(suppressed); err != nil || alert != nil {
+		t.Fatalf("suppressed retry after restart = %+v, %v", alert, err)
+	}
+}
+
 func TestSeenIndexIsBoundedByAlertRetention(t *testing.T) {
 	engine := alerts.New(time.Hour)
 	for index := 0; index < 1100; index++ {

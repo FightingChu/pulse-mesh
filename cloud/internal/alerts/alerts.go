@@ -115,6 +115,11 @@ func (e *Engine) load(file *os.File) error {
 			e.addMemory(*record.Alert)
 		case "ack":
 			e.ackMemory(record.ID, record.AckedAt())
+		case "dedup":
+			if record.EventKey == "" {
+				return fmt.Errorf("dedup record has no event key")
+			}
+			e.eventSeen[record.EventKey] = struct{}{}
 		default:
 			return fmt.Errorf("unknown alert journal record %q", record.Type)
 		}
@@ -224,6 +229,12 @@ func (e *Engine) raise(eventID, deviceID, metric, level string, value float64, m
 	}
 
 	if last, ok := e.seen[key]; ok && now.Sub(last) < e.window {
+		if eventKey != "" {
+			if err := e.appendRecord(journalRecord{Type: "dedup", EventKey: eventKey}); err != nil {
+				return nil, err
+			}
+			e.eventSeen[eventKey] = struct{}{}
+		}
 		return nil, nil
 	}
 
