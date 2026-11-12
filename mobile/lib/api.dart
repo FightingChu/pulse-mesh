@@ -76,6 +76,8 @@ class ApiClient {
         final body = jsonDecode(response.body);
         if (body is Map<String, dynamic> && body['error'] is String) {
           message = body['error'] as String;
+        } else if (response.body.isNotEmpty) {
+          message = response.body;
         }
       } on FormatException {
         if (response.body.isNotEmpty) message = response.body;
@@ -107,8 +109,12 @@ class ApiClient {
   }
 
   Future<void> ack(String id) async {
+    if (id.isEmpty) {
+      throw const FormatException('alert id must not be empty');
+    }
+    final encodedId = Uri.encodeComponent(id);
     final response = await _client
-        .post(Uri.parse('$apiBase/api/v1/alerts/$id/ack'))
+        .post(Uri.parse('$apiBase/api/v1/alerts/$encodedId/ack'))
         .timeout(const Duration(seconds: 5));
     _decodeSuccess(response);
   }

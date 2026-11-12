@@ -57,4 +57,42 @@ void main() {
       ),
     );
   });
+
+  test('ack encodes alert ID as a single path segment', () async {
+    final client = ApiClient(MockClient((request) async {
+      expect(request.url.pathSegments, ['api', 'v1', 'alerts', 'alert/part', 'ack']);
+      return http.Response('{"status":"acked"}', 200);
+    }));
+    addTearDown(client.close);
+
+    await client.ack('alert/part');
+  });
+
+  test('non-JSON API error remains a readable exception', () async {
+    final client = ApiClient(MockClient((request) async {
+      return http.Response('<html>gateway failure</html>', 502);
+    }));
+    addTearDown(client.close);
+
+    await expectLater(
+      client.alerts(),
+      throwsA(
+        isA<ApiException>()
+            .having((error) => error.statusCode, 'statusCode', 502)
+            .having((error) => error.message, 'message', '<html>gateway failure</html>'),
+      ),
+    );
+  });
+
+  test('ack rejects an empty alert ID before making a request', () async {
+    var called = false;
+    final client = ApiClient(MockClient((request) async {
+      called = true;
+      return http.Response('', 200);
+    }));
+    addTearDown(client.close);
+
+    await expectLater(client.ack(''), throwsFormatException);
+    expect(called, isFalse);
+  });
 }
