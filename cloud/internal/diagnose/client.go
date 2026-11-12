@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -132,6 +133,9 @@ func (c *Client) doDiagnose(ctx context.Context, req Request) (Result, bool, err
 	if err != nil {
 		return Result{}, true, fmt.Errorf("read ai response: %w", err)
 	}
+	if len(payload) == 1<<20 {
+		return Result{}, true, fmt.Errorf("AI response exceeds 1 MiB limit")
+	}
 	if resp.StatusCode != http.StatusOK {
 		var apiErr struct {
 			Error string `json:"error"`
@@ -146,12 +150,35 @@ func (c *Client) doDiagnose(ctx context.Context, req Request) (Result, bool, err
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return Result{}, true, fmt.Errorf("decode ai response: %w", err)
 	}
-	if result.DeviceID == "" {
-		result.DeviceID = req.DeviceID
-	}
-	if result.EventID == "" {
-		result.EventID = req.EventID
+	if err := validateResult(req, result); err != nil {
+		return Result{}, true, fmt.Errorf("invalid AI response: %w", err)
 	}
 	result.DiagnosedAt = time.Now().UTC()
 	return result, false, nil
+}
+
+func validateResult(req Request, result Result) error {
+	if result.DeviceID != req.DeviceID {
+		return fmt.Errorf("device_id mismatch")
+	}
+	if result.EventID != req.EventID {
+		return fmt.Errorf("event_id mismatch")
+	}
+	if result.Fault != "normal" && result.Fault != "bearing_wear" && result.Fault != "misalignment" && result.Fault != "imbalance" && result.Fault != "looseness" {
+		return fmt.Errorf("unknown fault %q", result.Fault)
+	}
+	values := []float64{result.DominantHz, result.PeakAmplitude, result.LowBand, result.MidBand, result.HighBand}
+	for _, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return fmt.Errorf("non-finite feature")
+		}
+	}
+	if result.DominantHz < 0 || result.PeakAmplitude < 0 || result.LowBand < 0 || result.MidBand < 0 || result.HighBand < 0 {
+		return fmt.Errorf("negative spectrum feature")
+	}
+	bandTotal := result.LowBand + result.MidBand + result.HighBand
+	if bandTotal > 1.05 {
+		return fmt.Errorf("band energy ratios sum to %.4f", bandTotal)
+	}
+	return nil
 }

@@ -72,6 +72,46 @@ func TestDiagnosePropagatesAIError(t *testing.T) {
 	}
 }
 
+func TestDiagnoseRejectsMismatchedAIResponse(t *testing.T) {
+	cases := []struct {
+		name string
+		body any
+	}{
+		{"device mismatch", diagnose.Result{DeviceID: "pump-02", EventID: "boot-1-spectrum-0", Fault: "normal"}},
+		{"missing event", diagnose.Result{DeviceID: "motor-01", Fault: "normal"}},
+		{"unknown fault", diagnose.Result{DeviceID: "motor-01", EventID: "boot-1-spectrum-0", Fault: "unknown"}},
+		{"band sum exceeds one", diagnose.Result{DeviceID: "motor-01", EventID: "boot-1-spectrum-0", Fault: "normal", LowBand: 0.8, MidBand: 0.5}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(testCase.body)
+			}))
+			defer server.Close()
+			client := diagnose.NewClient(server.URL)
+			request := diagnose.Request{EventID: "boot-1-spectrum-0", DeviceID: "motor-01", Values: []float64{1, 2}}
+			if _, err := client.Diagnose(context.Background(), request); err == nil {
+				t.Fatal("expected malformed AI response rejection")
+			}
+		})
+	}
+}
+
+func TestDiagnoseRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"device_id":"motor-01","fault":"normal","padding":"`))
+		_, _ = w.Write(make([]byte, 1<<20))
+		_, _ = w.Write([]byte(`"}`))
+	}))
+	defer server.Close()
+	client := diagnose.NewClient(server.URL)
+	request := diagnose.Request{EventID: "boot-1-spectrum-0", DeviceID: "motor-01", Values: []float64{1}}
+	if _, err := client.Diagnose(context.Background(), request); err == nil {
+		t.Fatal("expected oversized response rejection")
+	}
+}
+
 func TestCircuitOpensAndAllowsSingleRecoveryProbe(t *testing.T) {
 	var calls atomic.Int32
 	var healthy atomic.Bool
@@ -81,7 +121,7 @@ func TestCircuitOpensAndAllowsSingleRecoveryProbe(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(diagnose.Result{DeviceID: "motor-01", Fault: "normal"})
+		_ = json.NewEncoder(w).Encode(diagnose.Result{DeviceID: "motor-01", EventID: "", Fault: "normal"})
 	}))
 	defer server.Close()
 
