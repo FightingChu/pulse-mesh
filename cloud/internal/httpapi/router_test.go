@@ -468,6 +468,44 @@ func TestDiagnoseRejectsWrongWaveformLength(t *testing.T) {
 	}
 }
 
+func TestDiagnoseDefaultsMissingFrequencies(t *testing.T) {
+	var aiCalls atomic.Int32
+	srv := newTestServerWithAI(t, &aiCalls)
+	defer srv.Close()
+	values := make([]float64, 1024)
+	payload := map[string]any{"device_id": "motor-01", "values": values}
+	body, _ := json.Marshal(payload)
+	resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if aiCalls.Load() != 1 {
+		t.Fatalf("AI calls = %d, want 1", aiCalls.Load())
+	}
+}
+
+func TestDiagnoseRejectsLowSampleRateEvenForDuplicateID(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+	values := make([]float64, 1024)
+	request := diagnose.Request{EventID: "duplicate-id", DeviceID: "motor-01", Values: values, SampleRateHz: 100, RotationHz: 25}
+	body, _ := json.Marshal(request)
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("attempt %d status = %d, want 400", attempt, resp.StatusCode)
+		}
+	}
+}
+
 func TestDiagnoseRejectsNonFiniteWaveform(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()

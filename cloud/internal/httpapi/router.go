@@ -186,6 +186,30 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "device_id and values are required"})
 			return
 		}
+		if len(req.Values) != maxWaveformValues {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "values must contain exactly 1024 samples"})
+			return
+		}
+		if !finite(req.SampleRateHz) || !finite(req.RotationHz) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample_rate_hz or rotation_hz"})
+			return
+		}
+		if req.SampleRateHz == 0 {
+			req.SampleRateHz = 1000
+		}
+		if req.RotationHz == 0 {
+			req.RotationHz = 25
+		}
+		if req.SampleRateHz < 240 || req.RotationHz < 0 || req.SampleRateHz < 2*req.RotationHz {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sample_rate_hz must be at least 240 and satisfy the rotation Nyquist limit"})
+			return
+		}
+		for _, value := range req.Values {
+			if !finite(value) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "waveform values must be finite numbers"})
+				return
+			}
+		}
 		if req.EventID != "" {
 			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
 				alert, err := engine.EvaluateFaultWithError(previous.DeviceID, previous.Fault)
@@ -200,26 +224,6 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				})
 				return
 			}
-		}
-		if len(req.Values) != maxWaveformValues {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "values must contain exactly 1024 samples"})
-			return
-		}
-		if !finite(req.SampleRateHz) || !finite(req.RotationHz) || req.SampleRateHz < 2*req.RotationHz || req.RotationHz < 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sample_rate_hz or rotation_hz"})
-			return
-		}
-		for _, value := range req.Values {
-			if !finite(value) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "waveform values must be finite numbers"})
-				return
-			}
-		}
-		if req.SampleRateHz <= 0 {
-			req.SampleRateHz = 1000
-		}
-		if req.RotationHz <= 0 {
-			req.RotationHz = 25
 		}
 		select {
 		case diagnoseSlots <- struct{}{}:

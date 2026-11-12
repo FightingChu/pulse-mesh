@@ -30,8 +30,8 @@ GET /api/v1/alerts?device=motor-01&include_acked=1 查询，POST /api/v1/alerts/
 拿回主频、频带能量和故障类型，落库后按故障等级自动生成告警：
 
 网关设备、采样数、采样周期、采样率和转频分别由 PULSE_EDGE_DEVICE_ID、PULSE_SAMPLE_COUNT、
-PULSE_SAMPLE_INTERVAL_MS、PULSE_SAMPLE_RATE_HZ、PULSE_ROTATION_HZ 配置。采样率至少 240 Hz，
-采样点数 1-100，采样率需满足转频 Nyquist 条件。默认一轮 10 点、每点 200 ms。
+PULSE_SAMPLE_INTERVAL_MS、PULSE_SAMPLE_RATE_HZ、PULSE_ROTATION_HZ 配置。诊断采样率至少 240 Hz，
+以捕获 120 Hz 轴承特征；采样点数 1-100，采样率需满足转频 Nyquist 条件。默认一轮 10 点、每点 200 ms。
 
 - bearing_wear / misalignment -> critical
 - imbalance / looseness -> warning
