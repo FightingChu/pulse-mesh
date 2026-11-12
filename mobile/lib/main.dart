@@ -85,11 +85,13 @@ class _SamplesViewState extends State<SamplesView> {
   Future<void> load() async {
     try {
       final data = await api.samples();
+      if (!mounted) return;
       setState(() {
         samples = data;
         status = 'ok';
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         status = 'offline';
       });
@@ -100,6 +102,12 @@ class _SamplesViewState extends State<SamplesView> {
   void initState() {
     super.initState();
     load();
+  }
+
+  @override
+  void dispose() {
+    api.close();
+    super.dispose();
   }
 
   @override
@@ -167,11 +175,13 @@ class _AlertsViewState extends State<AlertsView> {
   Future<void> load() async {
     try {
       final data = await api.alerts(includeAcked: true);
+      if (!mounted) return;
       setState(() {
         alerts = data;
         status = 'ok';
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         status = 'offline';
       });
@@ -194,6 +204,12 @@ class _AlertsViewState extends State<AlertsView> {
   void initState() {
     super.initState();
     load();
+  }
+
+  @override
+  void dispose() {
+    api.close();
+    super.dispose();
   }
 
   @override

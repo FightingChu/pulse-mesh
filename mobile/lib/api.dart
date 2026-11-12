@@ -67,11 +67,29 @@ class ApiClient {
 
   ApiClient([http.Client? client]) : _client = client ?? http.Client();
 
+  void close() => _client.close();
+
+  dynamic _decodeSuccess(http.Response response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      var message = 'HTTP ${response.statusCode}';
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map<String, dynamic> && body['error'] is String) {
+          message = body['error'] as String;
+        }
+      } on FormatException {
+        if (response.body.isNotEmpty) message = response.body;
+      }
+      throw ApiException(response.statusCode, message);
+    }
+    return jsonDecode(response.body);
+  }
+
   Future<List<Sample>> samples() async {
     final resp = await _client
         .get(Uri.parse('$apiBase/api/v1/samples'))
         .timeout(const Duration(seconds: 5));
-    final data = jsonDecode(resp.body) as List<dynamic>;
+    final data = _decodeSuccess(resp) as List<dynamic>;
     return data
         .map((item) => Sample.fromJson(item as Map<String, dynamic>))
         .toList();
@@ -82,15 +100,26 @@ class ApiClient {
     final resp = await _client
         .get(Uri.parse('$apiBase/api/v1/alerts$query'))
         .timeout(const Duration(seconds: 5));
-    final data = jsonDecode(resp.body) as List<dynamic>;
+    final data = _decodeSuccess(resp) as List<dynamic>;
     return data
         .map((item) => AlertItem.fromJson(item as Map<String, dynamic>))
         .toList();
   }
 
   Future<void> ack(String id) async {
-    await _client
+    final response = await _client
         .post(Uri.parse('$apiBase/api/v1/alerts/$id/ack'))
         .timeout(const Duration(seconds: 5));
+    _decodeSuccess(response);
   }
+}
+
+class ApiException implements Exception {
+  final int statusCode;
+  final String message;
+
+  const ApiException(this.statusCode, this.message);
+
+  @override
+  String toString() => 'ApiException($statusCode): $message';
 }
