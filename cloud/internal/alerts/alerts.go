@@ -176,11 +176,160 @@ func (e *Engine) Evaluate(s ingest.Sample) *Alert {
 }
 
 func (e *Engine) EvaluateWithError(s ingest.Sample) (*Alert, error) {
-	if s.Level != "warning" && s.Level != "critical" {
-		return nil, nil
+	alerts, err := e.EvaluateBatchWithError([]ingest.Sample{s})
+	if err != nil || len(alerts) == 0 {
+		return nil, err
 	}
-	message := fmt.Sprintf("%s on %s is %s (%.2f)", s.Metric, s.DeviceID, s.Level, s.Value)
-	return e.raise(s.EventID, s.DeviceID, s.Metric, s.Level, s.Value, message)
+	return &alerts[0], nil
+}
+
+func (e *Engine) EvaluateBatchWithError(samples []ingest.Sample) ([]Alert, error) {
+	if len(samples) == 0 {
+		return []Alert{}, nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	now := time.Now().UTC()
+	seenEvents := make(map[string]struct{}, len(samples))
+	seenWindow := make(map[string]time.Time)
+	newEvents := make(map[string]struct{})
+	records := make([]journalRecord, 0, len(samples))
+	alerts := make([]Alert, 0, len(samples))
+	for _, sample := range samples {
+		if sample.Level != "warning" && sample.Level != "critical" {
+			continue
+		}
+		metric := sample.Metric
+		message := fmt.Sprintf("%s on %s is %s (%.2f)", metric, sample.DeviceID, sample.Level, sample.Value)
+		if err := e.planAlert(sample.EventID, sample.DeviceID, metric, sample.Level, sample.Value, message, now, seenEvents, seenWindow, newEvents, &records, &alerts); err != nil {
+			return nil, err
+		}
+	}
+	if err := e.appendRecords(records); err != nil {
+		return nil, err
+	}
+	e.commitPlanned(records, seenWindow, newEvents)
+	return alerts, nil
+}
+
+func (e *Engine) EvaluateFaultEventBatchWithError(deviceID string, events []FaultEvent) ([]Alert, error) {
+	if len(events) == 0 {
+		return []Alert{}, nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	now := time.Now().UTC()
+	seenEvents := make(map[string]struct{}, len(events))
+	seenWindow := make(map[string]time.Time)
+	newEvents := make(map[string]struct{})
+	records := make([]journalRecord, 0, len(events))
+	alerts := make([]Alert, 0, len(events))
+	for _, event := range events {
+		level := FaultLevel(event.Fault)
+		if level == "" {
+			continue
+		}
+		message := fmt.Sprintf("%s detected on %s", event.Fault, deviceID)
+		if err := e.planAlert(event.EventID, deviceID, "fault:"+event.Fault, level, 0, message, now, seenEvents, seenWindow, newEvents, &records, &alerts); err != nil {
+			return nil, err
+		}
+	}
+	if err := e.appendRecords(records); err != nil {
+		return nil, err
+	}
+	e.commitPlanned(records, seenWindow, newEvents)
+	return alerts, nil
+}
+
+type FaultEvent struct {
+	EventID string
+	Fault   string
+}
+
+func (e *Engine) planAlert(eventID, deviceID, metric, level string, value float64, message string, now time.Time,
+	seenEvents map[string]struct{}, seenWindow map[string]time.Time, newEvents map[string]struct{},
+	records *[]journalRecord, alerts *[]Alert) error {
+	key := deviceID + "|" + metric + "|" + level
+	eventKey := ""
+	if eventID != "" {
+		eventKey = deviceID + "\x00" + eventID
+		if _, exists := e.eventSeen[eventKey]; exists {
+			return nil
+		}
+		if _, exists := seenEvents[eventKey]; exists {
+			return nil
+		}
+	}
+	seenAt, exists := seenWindow[key]
+	if !exists {
+		seenAt, exists = e.seen[key]
+	}
+	if exists && now.Sub(seenAt) < e.window {
+		if eventKey != "" {
+			*records = append(*records, journalRecord{Type: "dedup", EventKey: eventKey})
+			seenEvents[eventKey] = struct{}{}
+			newEvents[eventKey] = struct{}{}
+		}
+		return nil
+	}
+
+	alert := Alert{
+		ID:        fmt.Sprintf("alert-%d", e.seq+len(*alerts)+1),
+		EventID:   eventID,
+		DeviceID:  deviceID,
+		Metric:    metric,
+		Level:     level,
+		Value:     value,
+		Message:   message,
+		CreatedAt: now,
+	}
+	*records = append(*records, journalRecord{Type: "create", Alert: &alert, SeenKey: key, EventKey: eventKey, SeenAt: &now})
+	seenWindow[key] = now
+	if eventKey != "" {
+		seenEvents[eventKey] = struct{}{}
+		newEvents[eventKey] = struct{}{}
+	}
+	*alerts = append(*alerts, alert)
+	return nil
+}
+
+func (e *Engine) appendRecords(records []journalRecord) error {
+	if len(records) == 0 || e.file == nil {
+		return nil
+	}
+	var payload []byte
+	for _, record := range records {
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return fmt.Errorf("encode alert record: %w", err)
+		}
+		payload = append(payload, encoded...)
+		payload = append(payload, '\n')
+	}
+	if err := journal.AppendSyncedLimit(e.file, payload, journal.MaxJournalBytes); err != nil {
+		if !errors.Is(err, journal.ErrCapacity) {
+			e.writesFailed++
+		}
+		return fmt.Errorf("persist alert batch: %w", err)
+	}
+	return nil
+}
+
+func (e *Engine) commitPlanned(records []journalRecord, seenWindow map[string]time.Time, newEvents map[string]struct{}) {
+	for key, at := range seenWindow {
+		e.seen[key] = at
+	}
+	for key := range newEvents {
+		e.eventSeen[key] = struct{}{}
+	}
+	for _, record := range records {
+		if record.Type == "create" && record.Alert != nil {
+			e.seq++
+			e.addMemory(*record.Alert)
+		}
+	}
 }
 
 func FaultLevel(fault string) string {

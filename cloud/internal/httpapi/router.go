@@ -366,15 +366,9 @@ func processSamples(store *ingest.Store, engine *alerts.Engine, samples []ingest
 	if err != nil {
 		return nil, nil, err
 	}
-	created := make([]alerts.Alert, 0)
-	for _, sample := range samples {
-		alert, err := engine.EvaluateWithError(sample)
-		if err != nil {
-			return added, created, err
-		}
-		if alert != nil {
-			created = append(created, *alert)
-		}
+	created, err := engine.EvaluateBatchWithError(samples)
+	if err != nil {
+		return added, nil, err
 	}
 	return added, created, nil
 }

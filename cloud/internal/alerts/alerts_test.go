@@ -206,6 +206,62 @@ func TestEventIDDedupRestoresAfterRestart(t *testing.T) {
 	}
 }
 
+func TestBatchEvaluationDeduplicatesAndPersistsEventMarkers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.jsonl")
+	engine, err := alerts.OpenStore(path, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	samples := []ingest.Sample{
+		{EventID: "boot-1-1", DeviceID: "motor-01", Metric: "vibration", Level: "critical", Value: 4.8},
+		{EventID: "boot-1-2", DeviceID: "motor-01", Metric: "vibration", Level: "critical", Value: 4.9},
+		{EventID: "boot-1-1", DeviceID: "motor-01", Metric: "vibration", Level: "critical", Value: 4.8},
+	}
+	created, err := engine.EvaluateBatchWithError(samples)
+	if err != nil {
+		t.Fatalf("evaluate batch: %v", err)
+	}
+	if len(created) != 1 {
+		t.Fatalf("created alerts = %d, want 1", len(created))
+	}
+	if got := len(engine.List("", true)); got != 1 {
+		t.Fatalf("stored alerts = %d, want 1", got)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := alerts.OpenStore(path, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	for _, sample := range samples[:2] {
+		alert, err := reopened.EvaluateWithError(sample)
+		if err != nil || alert != nil {
+			t.Fatalf("retry event %q created alert %+v: %v", sample.EventID, alert, err)
+		}
+	}
+}
+
+func TestBatchWindowSuppressionWritesAllEventMarkersOnce(t *testing.T) {
+	engine := alerts.New(time.Hour)
+	first := sampleForDevice("motor-01", "critical")
+	first.EventID = "boot-1-first"
+	if alert := engine.Evaluate(first); alert == nil {
+		t.Fatal("first event should alert")
+	}
+	second := first
+	second.EventID = "boot-1-second"
+	created, err := engine.EvaluateBatchWithError([]ingest.Sample{second, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 0 {
+		t.Fatalf("window-suppressed batch created %d alerts", len(created))
+	}
+}
+
 func TestWindowSuppressedEventRemainsDeduplicatedAfterWindow(t *testing.T) {
 	engine := alerts.New(5 * time.Millisecond)
 	first := sampleForDevice("motor-01", "critical")
