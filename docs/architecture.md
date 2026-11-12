@@ -64,6 +64,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - Python AI HTTP 服务最多 8 个 worker，最多排队 16 个连接；饱和时返回 503/Retry-After: 1，socket 请求读取超时 5 秒，可用 PULSE_AI_MAX_WORKERS 设置 1-64 worker。
 - 云端同时最多运行 4 个频谱诊断请求，超额返回 429 和 Retry-After，避免波形计算与等待 AI 无界堆积。
 - 网关将每 10 条遥测合并到 POST /api/v1/samples/batch，批量上限 100；服务先校验整批，再逐条幂等写入，响应分别报告 stored / duplicates / alerts。
+- GET /api/v1/samples 与 GET /api/v1/diagnoses 支持 limit=1..100，默认 100，拒绝超界参数。
 - 持久化批量先编码整批，再一次追加并 fsync，成功后才改内存状态；降低磁盘同步次数并避免半批写入。
 - `/health/live` 只报告进程存活；`/health/ready` 检查样本、诊断、告警存储可用性。Kubernetes 分别用作 liveness 和 readiness probe。
 - `/metrics` 响应在快照前计入本次 scrape；外层请求日志不重复增加该计数。

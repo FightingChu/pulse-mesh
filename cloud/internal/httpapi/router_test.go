@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +123,46 @@ func TestPostThenList(t *testing.T) {
 	}
 	if samples[0].DeviceID != "motor-01" || samples[0].Value != 4.8 {
 		t.Fatalf("unexpected sample: %+v", samples[0])
+	}
+}
+
+func TestSamplesListHonorsBoundedLimit(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+	for index := 0; index < 3; index++ {
+		payload := fmt.Sprintf(`{"device_id":"motor-01","metric":"vibration","value":%d}`, index)
+		resp, err := http.Post(srv.URL+"/api/v1/samples", "application/json", strings.NewReader(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	resp, err := http.Get(srv.URL + "/api/v1/samples?limit=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var samples []ingest.Sample
+	if err := json.NewDecoder(resp.Body).Decode(&samples); err != nil {
+		t.Fatal(err)
+	}
+	if len(samples) != 2 || samples[0].Value != 2 || samples[1].Value != 1 {
+		t.Fatalf("samples = %+v, want newest two", samples)
+	}
+}
+
+func TestListRejectsInvalidLimit(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+	for _, limit := range []string{"0", "-1", "101", "many"} {
+		resp, err := http.Get(srv.URL + "/api/v1/samples?limit=" + limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("limit %q status = %d, want 400", limit, resp.StatusCode)
+		}
 	}
 }
 
@@ -583,6 +624,30 @@ func TestDiagnoseRejectsInvalidIdentityBeforeCallingAI(t *testing.T) {
 	}
 	if calls := aiCalls.Load(); calls != 0 {
 		t.Fatalf("AI calls = %d, want 0", calls)
+	}
+}
+
+func TestDiagnosesListHonorsLimit(t *testing.T) {
+	store := diagnose.NewStore(10)
+	for index := 0; index < 3; index++ {
+		added, err := store.Add(diagnose.Result{DeviceID: "motor-01", EventID: fmt.Sprintf("event-%d", index), Fault: "normal"})
+		if err != nil || !added {
+			t.Fatalf("add result %d = %v, %v", index, added, err)
+		}
+	}
+	srv := httptest.NewServer(httpapi.New(ingest.NewStore(), alerts.New(time.Minute), diagnose.NewClient("http://127.0.0.1:1"), store))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/api/v1/diagnoses?device=motor-01&limit=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var results []diagnose.Result
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 || results[0].EventID != "event-2" || results[1].EventID != "event-1" {
+		t.Fatalf("results = %+v, want newest two", results)
 	}
 }
 

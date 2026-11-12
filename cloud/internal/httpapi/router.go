@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"pulse-mesh/cloud/internal/alerts"
@@ -84,7 +85,12 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				"alert":  created,
 			})
 		case http.MethodGet:
-			writeJSON(w, http.StatusOK, store.List(r.URL.Query().Get("device"), 100))
+			limit, err := queryLimit(r, 100)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, store.List(r.URL.Query().Get("device"), limit))
 		default:
 			w.Header().Set("Allow", "GET, POST")
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -285,7 +291,12 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		writeJSON(w, http.StatusOK, diagnoses.List(r.URL.Query().Get("device"), 100))
+		limit, err := queryLimit(r, 100)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, diagnoses.List(r.URL.Query().Get("device"), limit))
 	})
 
 	return withCORS(withLogging(metrics, withRecovery(mux)))
@@ -371,4 +382,16 @@ func processSamples(store *ingest.Store, engine *alerts.Engine, samples []ingest
 		return added, nil, err
 	}
 	return added, created, nil
+}
+
+func queryLimit(r *http.Request, defaultLimit int) (int, error) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return defaultLimit, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > 100 {
+		return 0, errors.New("limit must be an integer between 1 and 100")
+	}
+	return limit, nil
 }
