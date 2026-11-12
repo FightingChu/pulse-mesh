@@ -1,7 +1,8 @@
 use std::fs::{self, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::net::TcpStream;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
 pub const DEFAULT_ADDR: &str = "127.0.0.1:8080";
@@ -11,6 +12,7 @@ pub const BATCH_PATH: &str = "/api/v1/samples/batch";
 pub const DIAGNOSE_PATH: &str = "/api/v1/diagnose";
 const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 128 * 1024;
+static OUTBOX_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EdgeConfig {
@@ -263,17 +265,35 @@ pub fn append_cache_to(path: &Path, route: &str, body: &str) -> io::Result<()> {
             "invalid or oversized cache record",
         ));
     }
-    let current_size = path.metadata().map(|meta| meta.len()).unwrap_or(0);
-    let record_size = route.len() as u64 + body.len() as u64 + 2;
-    if current_size.saturating_add(record_size) > MAX_CACHE_BYTES {
+    let _guard = OUTBOX_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("offline cache lock poisoned"))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    let start = file.metadata()?.len();
+    let mut record = Vec::with_capacity(route.len() + body.len() + 2);
+    writeln!(&mut record, "{}\t{}", route, body)?;
+    if start.saturating_add(record.len() as u64) > MAX_CACHE_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::WriteZero,
             "offline cache limit reached",
         ));
     }
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    writeln!(file, "{}\t{}", route, body)?;
-    file.sync_data()
+    file.seek(std::io::SeekFrom::End(0))?;
+    if let Err(write_error) = file.write_all(&record).and_then(|()| file.sync_data()) {
+        let rollback_error = file.set_len(start).and_then(|()| file.sync_data());
+        return match rollback_error {
+            Ok(()) => Err(write_error),
+            Err(rollback_error) => Err(io::Error::new(
+                rollback_error.kind(),
+                format!("write failed: {write_error}; rollback failed: {rollback_error}"),
+            )),
+        };
+    }
+    Ok(())
 }
 
 pub fn read_cache(path: &Path) -> io::Result<Vec<String>> {
@@ -593,5 +613,59 @@ mod tests {
         assert!(append_cache_to(&path, "/admin", "{}").is_err());
         assert!(append_cache(&path, "{}\n{}").is_err());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn concurrent_cache_appends_keep_records_separate() {
+        use std::sync::{Arc, Barrier};
+
+        let path = temp_path("concurrent-appends");
+        let writers = 32;
+        let barrier = Arc::new(Barrier::new(writers));
+        let mut handles = Vec::new();
+        for index in 0..writers {
+            let writer_path = path.clone();
+            let writer_barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                writer_barrier.wait();
+                append_cache(&writer_path, &format!("{{\"event\":{index}}}"))
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+
+        let records = read_cache(&path).unwrap();
+        assert_eq!(records.len(), writers);
+        let mut events = std::collections::HashSet::new();
+        for record in records {
+            let (route, body) = record.split_once('\t').unwrap();
+            assert_eq!(route, SAMPLE_PATH);
+            let event = body
+                .strip_prefix("{\"event\":")
+                .and_then(|value| value.strip_suffix('}'))
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+            events.insert(event);
+        }
+        assert_eq!(events.len(), writers);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn cache_capacity_rejects_without_partial_record() {
+        let path = temp_path("capacity");
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.set_len(MAX_CACHE_BYTES - 1).unwrap();
+        drop(file);
+        let err = append_cache(&path, "{}").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::WriteZero);
+        assert_eq!(path.metadata().unwrap().len(), MAX_CACHE_BYTES - 1);
+        let _ = fs::remove_file(path);
     }
 }
