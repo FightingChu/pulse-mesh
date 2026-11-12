@@ -211,6 +211,52 @@ func TestCallerCancellationDoesNotTripCircuit(t *testing.T) {
 	}
 }
 
+func TestCancelledRecoveryProbeDoesNotCloseCircuit(t *testing.T) {
+	var healthy atomic.Bool
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var req diagnose.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		if !healthy.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(diagnose.Result{EventID: req.EventID, DeviceID: req.DeviceID, Fault: "normal"})
+	}))
+	defer server.Close()
+	client := diagnose.NewClientWithBreaker(server.URL, time.Second, 1, 20*time.Millisecond)
+	request := diagnose.Request{EventID: "event-1", DeviceID: "motor-01", Values: []float64{1}}
+
+	if _, err := client.Diagnose(context.Background(), request); err == nil {
+		t.Fatal("initial unavailable call should fail")
+	}
+	time.Sleep(25 * time.Millisecond)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := client.Diagnose(cancelled, request); !errors.Is(err, context.Canceled) {
+		t.Fatalf("probe error = %v, want context canceled", err)
+	}
+	if _, err := client.Diagnose(context.Background(), request); err == nil {
+		t.Fatal("probe against unhealthy AI should fail and reopen circuit")
+	}
+	if _, err := client.Diagnose(context.Background(), request); !errors.Is(err, diagnose.ErrCircuitOpen) {
+		t.Fatalf("circuit error = %v, want open", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("AI calls = %d, want 2", got)
+	}
+
+	healthy.Store(true)
+	time.Sleep(25 * time.Millisecond)
+	if _, err := client.Diagnose(context.Background(), request); err != nil {
+		t.Fatalf("healthy recovery probe: %v", err)
+	}
+}
+
 func TestStoreIsBoundedAndNewestFirst(t *testing.T) {
 	store := diagnose.NewStore(3)
 	for i := 0; i < 5; i++ {

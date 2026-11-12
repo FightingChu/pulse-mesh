@@ -75,7 +75,13 @@ func (c *Client) Diagnose(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 	result, countFailure, err := c.doDiagnose(ctx, req)
-	c.finishRequest(probe, countFailure && err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded))
+	if err == nil {
+		c.finishRequest(probe, true, false)
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		c.finishRequest(probe, false, false)
+	} else {
+		c.finishRequest(probe, false, countFailure)
+	}
 	return result, err
 }
 
@@ -95,12 +101,16 @@ func (c *Client) beginRequest() (bool, error) {
 	return true, nil
 }
 
-func (c *Client) finishRequest(probe, failed bool) {
+func (c *Client) finishRequest(probe, succeeded, failed bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !failed {
+	if succeeded {
 		c.failureCount = 0
 		c.openUntil = time.Time{}
+		c.probeInFlight = false
+		return
+	}
+	if !failed {
 		c.probeInFlight = false
 		return
 	}
