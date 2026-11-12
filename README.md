@@ -21,6 +21,7 @@
 - 设置 `PULSE_DATA_DIR` 开启 JSONL 持久化；Compose/Helm 已挂载 `pulse-data` 卷
 - AI 熔断冷却保护；云端最多并发处理 4 个诊断请求
 - JSONL 后端自动修复断电尾行；Kubernetes 持久化配置按单副本部署
+- 持久化目录带操作系统独占锁，阻止第二个写实例
 - `/health/live` 和 `/health/ready` 分离进程存活与存储可用状态
 - 持久化日志单文件 256 MiB 上限；Prometheus 监控记录数、日志大小和写失败数
 - `ai/` Python 3.14 stdlib-only，z-score 异常检测 + FFT 频谱故障分类
@@ -93,7 +94,7 @@ curl "http://127.0.0.1:8080/api/v1/samples?device=motor-01"
 
 ## 验证状态
 
-- 已跑通：Go 47 个测试、Python 24 个测试、Rust 17 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、网关波形诊断转 AI 并自动告警
+- 已跑通：Go 48 个测试、Python 24 个测试、Rust 17 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、网关波形诊断转 AI 并自动告警
 - 未验证：Flutter（本机未装）、Docker / K8s 部署（本机无 Docker）
 
 工具链安装见 `docs/dev-setup.md`。中文路径会让 MinGW / Rust 链接器读不到文件，用 ASCII junction 构建。

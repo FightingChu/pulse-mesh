@@ -14,6 +14,7 @@ import (
 	"pulse-mesh/cloud/internal/diagnose"
 	"pulse-mesh/cloud/internal/httpapi"
 	"pulse-mesh/cloud/internal/ingest"
+	"pulse-mesh/cloud/internal/journal"
 )
 
 func main() {
@@ -31,24 +32,30 @@ func main() {
 		alertWindow = parsed
 	}
 	dataDir := os.Getenv("PULSE_DATA_DIR")
+	dataLock, err := journal.AcquireDirectoryLock(dataDir)
+	if err != nil {
+		log.Fatalf("lock data directory: %v", err)
+	}
 	sampleStore := ingest.NewStore()
 	diagnosisStore := diagnose.NewStore(1000)
 	alertEngine := alerts.New(alertWindow)
 	if dataDir != "" {
-		var err error
 		sampleStore, err = ingest.OpenStore(filepath.Join(dataDir, "samples.jsonl"))
 		if err != nil {
+			_ = dataLock.Close()
 			log.Fatalf("open sample store: %v", err)
 		}
 		diagnosisStore, err = diagnose.OpenStore(filepath.Join(dataDir, "diagnoses.jsonl"), 1000)
 		if err != nil {
 			_ = sampleStore.Close()
+			_ = dataLock.Close()
 			log.Fatalf("open diagnosis store: %v", err)
 		}
 		alertEngine, err = alerts.OpenStore(filepath.Join(dataDir, "alerts.jsonl"), alertWindow)
 		if err != nil {
 			_ = sampleStore.Close()
 			_ = diagnosisStore.Close()
+			_ = dataLock.Close()
 			log.Fatalf("open alert store: %v", err)
 		}
 	}
@@ -91,6 +98,9 @@ func main() {
 	}
 	if err := alertEngine.Close(); err != nil {
 		log.Printf("close alert store: %v", err)
+	}
+	if err := dataLock.Close(); err != nil {
+		log.Printf("release data directory lock: %v", err)
 	}
 }
 
