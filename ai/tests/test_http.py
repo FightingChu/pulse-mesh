@@ -6,6 +6,7 @@ import sys
 import threading
 import unittest
 import urllib.request
+import urllib.error
 from http.server import HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
@@ -26,6 +27,52 @@ class HTTPTest(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=5)
+
+    def test_bounded_server_rejects_excess_connections(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class SlowHandler(main.H):
+            def do_GET(self):
+                if self.path == '/slow':
+                    entered.set()
+                    release.wait(timeout=3)
+                    self._send({'status': 'ok'})
+                    return
+                super().do_GET()
+
+        server = main.BoundedThreadingHTTPServer(('127.0.0.1', 0), SlowHandler, max_workers=1)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = 'http://127.0.0.1:%d' % server.server_port
+        slow_result = []
+
+        def request_slow():
+            try:
+                with urllib.request.urlopen(base + '/slow', timeout=5) as response:
+                    slow_result.append(response.status)
+            except Exception as exc:
+                slow_result.append(exc)
+
+        slow_thread = threading.Thread(target=request_slow)
+        slow_thread.start()
+        self.assertTrue(entered.wait(timeout=2), 'slow request did not occupy the worker')
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(base + '/health', timeout=5)
+            self.assertEqual(ctx.exception.code, 503)
+            self.assertEqual(ctx.exception.headers.get('Retry-After'), '1')
+        finally:
+            release.set()
+            slow_thread.join(timeout=5)
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+        self.assertEqual(slow_result, [200])
+
+    def test_bounded_server_validates_worker_limit(self):
+        with self.assertRaises(ValueError):
+            main.BoundedThreadingHTTPServer(('127.0.0.1', 0), main.H, max_workers=0)
 
     def test_health(self):
         with urllib.request.urlopen(self.base + "/health", timeout=5) as resp:

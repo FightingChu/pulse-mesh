@@ -20,6 +20,9 @@ spec:
           imagePullPolicy: {{ .Values.ai.image.pullPolicy }}
           ports:
             - containerPort: 8000
+          env:
+            - name: PULSE_AI_MAX_WORKERS
+              value: {{ .Values.ai.maxWorkers | quote }}
           readinessProbe:
             httpGet:
               path: /health/live

@@ -1,4 +1,5 @@
 import json, math, os, sys, time
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -10,6 +11,9 @@ WARN_Z = 3.0
 CRITICAL_Z = 6.0
 MAX_BODY_BYTES = 128 * 1024
 MAX_WAVEFORM_VALUES = 1024
+DEFAULT_MAX_WORKERS = 8
+MAX_WORKERS_LIMIT = 64
+REQUEST_TIMEOUT_SECONDS = 5
 
 def rms(values):
     return math.sqrt(sum(v*v for v in values)/len(values)) if values else 0.0
@@ -98,9 +102,56 @@ class H(BaseHTTPRequestHandler):
             return
         sys.stderr.write('%s %s\n' % (time.strftime('%Y-%m-%dT%H:%M:%S'), a[0] % a[1:]))
 
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    request_queue_size = 16
+    daemon_threads = True
+
+    def __init__(self, server_address, handler_class, max_workers=DEFAULT_MAX_WORKERS, request_timeout=REQUEST_TIMEOUT_SECONDS):
+        if max_workers < 1 or max_workers > MAX_WORKERS_LIMIT:
+            raise ValueError('max_workers must be between 1 and 64')
+        self._worker_slots = threading.BoundedSemaphore(max_workers)
+        self._request_timeout = request_timeout
+        super().__init__(server_address, handler_class)
+
+    def get_request(self):
+        request, address = super().get_request()
+        request.settimeout(self._request_timeout)
+        return request, address
+
+    def process_request(self, request, client_address):
+        if not self._worker_slots.acquire(blocking=False):
+            try:
+                body = b'{"error":"AI service busy"}'
+                request.sendall(
+                    b'HTTP/1.1 503 Service Unavailable\r\n'
+                    b'Content-Type: application/json\r\n'
+                    b'Retry-After: 1\r\n'
+                    b'Connection: close\r\n'
+                    + ('Content-Length: %d\r\n\r\n' % len(body)).encode()
+                    + body
+                )
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._worker_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._worker_slots.release()
+
 if __name__ == '__main__':
-    server = ThreadingHTTPServer(('0.0.0.0', 8000), H)
-    server.daemon_threads = True
+    try:
+        max_workers = int(os.environ.get('PULSE_AI_MAX_WORKERS', DEFAULT_MAX_WORKERS))
+        server = BoundedThreadingHTTPServer(('0.0.0.0', 8000), H, max_workers=max_workers)
+    except ValueError as exc:
+        raise SystemExit('invalid AI server configuration: %s' % exc)
     print('pulse-mesh ai listening :8000', flush=True)
     try:
         server.serve_forever()

@@ -51,6 +51,9 @@ spec:
       - name: ai
         image: pulse-mesh/ai:0.1.0
         ports: [{containerPort: 8000}]
+        env:
+        - name: PULSE_AI_MAX_WORKERS
+          value: "8"
         readinessProbe: {httpGet: {path: /health/live, port: 8000}}
 ---
 apiVersion: v1
