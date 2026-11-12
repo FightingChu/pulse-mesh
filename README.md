@@ -95,7 +95,7 @@ curl "http://127.0.0.1:8080/api/v1/samples?device=motor-01"
 
 ## 验证状态
 
-- 已跑通：Go 52 个测试、Python 28 个测试、Rust 17 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、网关波形诊断转 AI 并自动告警
+- 已跑通：Go 53 个测试、Python 28 个测试、Rust 17 个测试、C++ 固件 CTest、云端+网关端到端、离线回放、网关波形诊断转 AI 并自动告警
 - 未验证：Flutter（本机未装）、Docker / K8s 部署（本机无 Docker）
 
 工具链安装见 `docs/dev-setup.md`。中文路径会让 MinGW / Rust 链接器读不到文件，用 ASCII junction 构建。

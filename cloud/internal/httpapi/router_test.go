@@ -557,6 +557,35 @@ func TestDiagnoseRejectsLowSampleRateEvenForDuplicateID(t *testing.T) {
 	}
 }
 
+func TestDiagnoseRejectsInvalidIdentityBeforeCallingAI(t *testing.T) {
+	var aiCalls atomic.Int32
+	srv := newTestServerWithAI(t, &aiCalls)
+	defer srv.Close()
+	values := make([]float64, 1024)
+	cases := []diagnose.Request{
+		{DeviceID: strings.Repeat("d", 65), Values: values, SampleRateHz: 1000, RotationHz: 25},
+		{DeviceID: "motor-01", EventID: strings.Repeat("e", 129), Values: values, SampleRateHz: 1000, RotationHz: 25},
+		{DeviceID: "motor-01\x00bad", Values: values, SampleRateHz: 1000, RotationHz: 25},
+	}
+	for _, request := range cases {
+		payload, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.Post(srv.URL+"/api/v1/diagnose", "application/json", strings.NewReader(string(payload)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	}
+	if calls := aiCalls.Load(); calls != 0 {
+		t.Fatalf("AI calls = %d, want 0", calls)
+	}
+}
+
 func TestDiagnoseRejectsNonFiniteWaveform(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()
