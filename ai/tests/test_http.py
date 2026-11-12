@@ -4,6 +4,7 @@ import os
 import socket
 import sys
 import threading
+import time
 import unittest
 import urllib.request
 import urllib.error
@@ -73,6 +74,26 @@ class HTTPTest(unittest.TestCase):
     def test_bounded_server_validates_worker_limit(self):
         with self.assertRaises(ValueError):
             main.BoundedThreadingHTTPServer(('127.0.0.1', 0), main.H, max_workers=0)
+
+    def test_slow_client_times_out_and_releases_worker(self):
+        server = main.BoundedThreadingHTTPServer(
+            ('127.0.0.1', 0), main.H, max_workers=1, request_timeout=0.1
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        address = server.server_address
+        try:
+            with socket.create_connection(address, timeout=2) as slow_client:
+                slow_client.sendall(b'GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n')
+                time.sleep(0.2)
+            with urllib.request.urlopen(
+                'http://127.0.0.1:%d/health' % address[1], timeout=2
+            ) as response:
+                self.assertEqual(response.status, 200)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_health(self):
         with urllib.request.urlopen(self.base + "/health", timeout=5) as resp:
