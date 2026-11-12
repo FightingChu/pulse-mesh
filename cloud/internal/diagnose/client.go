@@ -75,7 +75,7 @@ func (c *Client) Diagnose(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 	result, countFailure, err := c.doDiagnose(ctx, req)
-	c.finishRequest(probe, countFailure && err != nil)
+	c.finishRequest(probe, countFailure && err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded))
 	return result, err
 }
 

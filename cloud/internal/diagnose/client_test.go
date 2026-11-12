@@ -3,6 +3,7 @@ package diagnose_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -169,6 +170,44 @@ func TestClientDoesNotTripCircuitOnAIValidationError(t *testing.T) {
 	}
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("validation errors opened the circuit, calls=%d", got)
+	}
+}
+
+func TestCallerCancellationDoesNotTripCircuit(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var request diagnose.Request
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(diagnose.Result{
+			EventID:  request.EventID,
+			DeviceID: "motor-01",
+			Fault:    "normal",
+		})
+	}))
+	defer server.Close()
+	client := diagnose.NewClientWithBreaker(server.URL, time.Second, 1, time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := diagnose.Request{EventID: "cancelled", DeviceID: "motor-01", Values: []float64{1}}
+	if _, err := client.Diagnose(ctx, request); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel error = %v, want context canceled", err)
+	}
+
+	request.EventID = "healthy"
+	result, err := client.Diagnose(context.Background(), request)
+	if err != nil {
+		t.Fatalf("valid request after cancellation: %v", err)
+	}
+	if result.Fault != "normal" {
+		t.Fatalf("result = %+v", result)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("AI calls = %d, want 1", calls.Load())
 	}
 }
 
