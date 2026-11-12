@@ -3,6 +3,7 @@ package alerts
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -144,7 +145,9 @@ func (e *Engine) appendRecord(record journalRecord) error {
 		return fmt.Errorf("encode alert record: %w", err)
 	}
 	if err := journal.AppendSyncedLimit(e.file, append(encoded, '\n'), journal.MaxJournalBytes); err != nil {
-		e.writesFailed++
+		if !errors.Is(err, journal.ErrCapacity) {
+			e.writesFailed++
+		}
 		return fmt.Errorf("persist alert record: %w", err)
 	}
 	return nil

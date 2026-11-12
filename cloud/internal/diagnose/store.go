@@ -3,6 +3,7 @@ package diagnose
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -108,8 +109,10 @@ func (s *Store) Add(r Result) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("encode diagnosis: %w", err)
 		}
-		if err := journal.AppendSynced(s.file, append(encoded, '\n')); err != nil {
-			s.writesFailed++
+		if err := journal.AppendSyncedLimit(s.file, append(encoded, '\n'), journal.MaxJournalBytes); err != nil {
+			if !errors.Is(err, journal.ErrCapacity) {
+				s.writesFailed++
+			}
 			return false, fmt.Errorf("persist diagnosis: %w", err)
 		}
 	}

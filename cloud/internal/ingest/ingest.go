@@ -3,6 +3,7 @@ package ingest
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -148,8 +149,10 @@ func (s *Store) AddBatch(samples []Sample) ([]bool, error) {
 		for _, line := range encoded {
 			record = append(record, line...)
 		}
-		if err := journal.AppendSynced(s.file, record); err != nil {
-			s.writesFailed++
+		if err := journal.AppendSyncedLimit(s.file, record, journal.MaxJournalBytes); err != nil {
+			if !errors.Is(err, journal.ErrCapacity) {
+				s.writesFailed++
+			}
 			return nil, fmt.Errorf("persist sample batch: %w", err)
 		}
 	}

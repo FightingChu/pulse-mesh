@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"pulse-mesh/cloud/internal/journal"
 )
 
 func TestRecoveryReturnsJSON500(t *testing.T) {
@@ -39,5 +41,20 @@ func TestNormalizePathCollapsesAlertIDs(t *testing.T) {
 		if got := normalizePath(input); got != want {
 			t.Fatalf("normalizePath(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestStorageCapacityMapsTo507(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeStorageError(recorder, journal.ErrCapacity, "sample persistence failed")
+	if recorder.Code != http.StatusInsufficientStorage {
+		t.Fatalf("status = %d, want 507", recorder.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["error"] != "sample persistence failed" {
+		t.Fatalf("body = %v", body)
 	}
 }
