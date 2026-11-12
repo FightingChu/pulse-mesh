@@ -19,6 +19,7 @@ import (
 
 type Alert struct {
 	ID        string     `json:"id"`
+	EventID   string     `json:"event_id,omitempty"`
 	DeviceID  string     `json:"device_id"`
 	Metric    string     `json:"metric"`
 	Level     string     `json:"level"`
@@ -33,6 +34,7 @@ type Engine struct {
 	mu           sync.Mutex
 	items        []Alert
 	seen         map[string]time.Time
+	eventSeen    map[string]struct{}
 	window       time.Duration
 	seq          int
 	maxKeep      int
@@ -45,18 +47,20 @@ func New(window time.Duration) *Engine {
 		window = 5 * time.Minute
 	}
 	return &Engine{
-		seen:    make(map[string]time.Time),
-		window:  window,
-		maxKeep: 1000,
+		seen:      make(map[string]time.Time),
+		eventSeen: make(map[string]struct{}),
+		window:    window,
+		maxKeep:   1000,
 	}
 }
 
 type journalRecord struct {
-	Type    string     `json:"type"`
-	Alert   *Alert     `json:"alert,omitempty"`
-	ID      string     `json:"id,omitempty"`
-	SeenKey string     `json:"seen_key,omitempty"`
-	SeenAt  *time.Time `json:"seen_at,omitempty"`
+	Type     string     `json:"type"`
+	Alert    *Alert     `json:"alert,omitempty"`
+	ID       string     `json:"id,omitempty"`
+	SeenKey  string     `json:"seen_key,omitempty"`
+	EventKey string     `json:"event_key,omitempty"`
+	SeenAt   *time.Time `json:"seen_at,omitempty"`
 }
 
 func OpenStore(path string, window time.Duration) (*Engine, error) {
@@ -104,6 +108,9 @@ func (e *Engine) load(file *os.File) error {
 			}
 			if record.SeenKey != "" && record.SeenAt != nil {
 				e.seen[record.SeenKey] = *record.SeenAt
+			}
+			if record.EventKey != "" {
+				e.eventSeen[record.EventKey] = struct{}{}
 			}
 			e.addMemory(*record.Alert)
 		case "ack":
@@ -168,7 +175,7 @@ func (e *Engine) EvaluateWithError(s ingest.Sample) (*Alert, error) {
 		return nil, nil
 	}
 	message := fmt.Sprintf("%s on %s is %s (%.2f)", s.Metric, s.DeviceID, s.Level, s.Value)
-	return e.raise(s.DeviceID, s.Metric, s.Level, s.Value, message)
+	return e.raise(s.EventID, s.DeviceID, s.Metric, s.Level, s.Value, message)
 }
 
 func FaultLevel(fault string) string {
@@ -188,20 +195,33 @@ func (e *Engine) EvaluateFault(deviceID, fault string) *Alert {
 }
 
 func (e *Engine) EvaluateFaultWithError(deviceID, fault string) (*Alert, error) {
+	return e.EvaluateFaultEventWithError(deviceID, "", fault)
+}
+
+func (e *Engine) EvaluateFaultEventWithError(deviceID, eventID, fault string) (*Alert, error) {
 	level := FaultLevel(fault)
 	if level == "" {
 		return nil, nil
 	}
 	message := fmt.Sprintf("%s detected on %s", fault, deviceID)
-	return e.raise(deviceID, "fault:"+fault, level, 0, message)
+	return e.raise(eventID, deviceID, "fault:"+fault, level, 0, message)
 }
 
-func (e *Engine) raise(deviceID, metric, level string, value float64, message string) (*Alert, error) {
+func (e *Engine) raise(eventID, deviceID, metric, level string, value float64, message string) (*Alert, error) {
 	key := deviceID + "|" + metric + "|" + level
+	eventKey := ""
+	if eventID != "" {
+		eventKey = deviceID + "\x00" + eventID
+	}
 	now := time.Now().UTC()
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if eventKey != "" {
+		if _, exists := e.eventSeen[eventKey]; exists {
+			return nil, nil
+		}
+	}
 
 	if last, ok := e.seen[key]; ok && now.Sub(last) < e.window {
 		return nil, nil
@@ -209,6 +229,7 @@ func (e *Engine) raise(deviceID, metric, level string, value float64, message st
 
 	alert := Alert{
 		ID:        fmt.Sprintf("alert-%d", e.seq+1),
+		EventID:   eventID,
 		DeviceID:  deviceID,
 		Metric:    metric,
 		Level:     level,
@@ -216,11 +237,14 @@ func (e *Engine) raise(deviceID, metric, level string, value float64, message st
 		Message:   message,
 		CreatedAt: now,
 	}
-	if err := e.appendRecord(journalRecord{Type: "create", Alert: &alert, SeenKey: key, SeenAt: &now}); err != nil {
+	if err := e.appendRecord(journalRecord{Type: "create", Alert: &alert, SeenKey: key, EventKey: eventKey, SeenAt: &now}); err != nil {
 		return nil, err
 	}
 	e.seq++
 	e.seen[key] = now
+	if eventKey != "" {
+		e.eventSeen[eventKey] = struct{}{}
+	}
 	e.addMemory(alert)
 	return &alert, nil
 }

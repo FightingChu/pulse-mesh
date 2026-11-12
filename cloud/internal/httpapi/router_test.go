@@ -152,6 +152,29 @@ func TestDuplicateSampleEventIsNotStoredTwice(t *testing.T) {
 	}
 }
 
+func TestDuplicateSampleEventDoesNotRaiseAlertAgain(t *testing.T) {
+	store := ingest.NewStore()
+	engine := alerts.New(time.Nanosecond)
+	server := httptest.NewServer(httpapi.New(store, engine, diagnose.NewClient("http://127.0.0.1:1"), diagnose.NewStore(10)))
+	defer server.Close()
+
+	payload := `{"event_id":"boot-1-sample-42","device_id":"motor-01","metric":"vibration_rms","value":4.8,"level":"critical"}`
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, err := http.Post(server.URL+"/api/v1/samples", "application/json", strings.NewReader(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if attempt == 0 && resp.StatusCode != http.StatusCreated {
+			t.Fatalf("first status = %d", resp.StatusCode)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := len(engine.List("", true)); got != 1 {
+		t.Fatalf("alerts = %d, want 1 after event retry", got)
+	}
+}
+
 func TestBatchSamplesValidatesThenStoresAndDeduplicates(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()

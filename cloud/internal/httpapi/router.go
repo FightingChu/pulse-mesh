@@ -212,7 +212,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		}
 		if req.EventID != "" {
 			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
-				alert, err := engine.EvaluateFaultWithError(previous.DeviceID, previous.Fault)
+				alert, err := engine.EvaluateFaultEventWithError(previous.DeviceID, previous.EventID, previous.Fault)
 				if err != nil {
 					writeStorageError(w, err, "alert persistence failed")
 					return
@@ -251,7 +251,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		}
 		if !added {
 			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
-				alert, err := engine.EvaluateFaultWithError(previous.DeviceID, previous.Fault)
+				alert, err := engine.EvaluateFaultEventWithError(previous.DeviceID, previous.EventID, previous.Fault)
 				if err != nil {
 					writeStorageError(w, err, "alert persistence failed")
 					return
@@ -264,7 +264,7 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				return
 			}
 		}
-		alert, err := engine.EvaluateFaultWithError(result.DeviceID, result.Fault)
+		alert, err := engine.EvaluateFaultEventWithError(result.DeviceID, result.EventID, result.Fault)
 		if err != nil {
 			writeStorageError(w, err, "alert persistence failed")
 			return

@@ -35,15 +35,6 @@ func TestCORSPreflight(t *testing.T) {
 func TestMetricsCountsRequests(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()
-
-	for i := 0; i < 2; i++ {
-		resp, err := http.Get(srv.URL + "/health")
-		if err != nil {
-			t.Fatalf("get health: %v", err)
-		}
-		resp.Body.Close()
-	}
-
 	resp, err := http.Get(srv.URL + "/metrics")
 	if err != nil {
 		t.Fatalf("get metrics: %v", err)
@@ -57,12 +48,25 @@ func TestMetricsCountsRequests(t *testing.T) {
 	if !strings.Contains(text, "# TYPE pulse_http_requests_total counter") {
 		t.Fatalf("missing metrics header: %s", text)
 	}
-	if !strings.Contains(text, `path="/health"`) || !strings.Contains(text, `status="200"`) {
-		t.Fatalf("missing health counter: %s", text)
+	if !strings.Contains(text, `method="GET",path="/metrics",status="200"} 1`) {
+		t.Fatalf("first scrape was not counted: %s", text)
 	}
 	if !strings.Contains(text, `pulse_store_records{store="samples"} 0`) ||
 		!strings.Contains(text, `pulse_store_journal_bytes{store="alerts"} 0`) {
 		t.Fatalf("missing fixed store metrics: %s", text)
+	}
+
+	resp, err = http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("second metrics scrape: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `method="GET",path="/metrics",status="200"} 2`) {
+		t.Fatalf("second scrape counter is incorrect: %s", body)
 	}
 }
 

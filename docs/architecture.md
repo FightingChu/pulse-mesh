@@ -51,7 +51,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - Prometheus 路由标签限制为已知路由，其他路径合并为 unmatched，避免路径注入造成高基数。
 - Rust outbox 限制 64 MiB、单条 128 KiB；追加后 sync_data，重放保留原始路由，只收到 2xx 后才确认移除。
 - Rust HTTP 客户端设置 5s 读写超时，只接受 2xx 作为成功；未知路由在连接前拒绝。
-- 网关事件带 event_id，样本和诊断以 device_id + event_id 幂等；诊断重试返回已有结果，不重复调用 AI 或生成告警。
+- 网关事件带 event_id，样本、诊断和由其触发的告警以 device_id + event_id 幂等；同一事件即使超过告警时间去重窗口或服务重启，也不会重复生成告警。
 - 幂等记录跟随各自内存保留窗口，云端重启后不持久；需要跨重启保证时应替换为持久化存储。
 - 设置 PULSE_DATA_DIR 后，云端将样本、诊断、告警分别写入 samples.jsonl、diagnoses.jsonl、alerts.jsonl；启动时恢复记录、event_id 索引、告警 ack 与去重窗口；Docker Compose 和 Helm 默认挂载持久卷。
 - JSONL 后端是单副本写入模式；Kubernetes 使用 Recreate 和一个 RWO 持久卷，不能直接扩为多副本。
@@ -66,6 +66,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - 网关将每 10 条遥测合并到 POST /api/v1/samples/batch，批量上限 100；服务先校验整批，再逐条幂等写入，响应分别报告 stored / duplicates / alerts。
 - 持久化批量先编码整批，再一次追加并 fsync，成功后才改内存状态；降低磁盘同步次数并避免半批写入。
 - `/health/live` 只报告进程存活；`/health/ready` 检查样本、诊断、告警存储可用性。Kubernetes 分别用作 liveness 和 readiness probe。
+- `/metrics` 响应在快照前计入本次 scrape；外层请求日志不重复增加该计数。
 
 # 判据
 

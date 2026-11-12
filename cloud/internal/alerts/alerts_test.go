@@ -165,6 +165,47 @@ func TestFailedJournalWriteDoesNotConsumeAlert(t *testing.T) {
 	}
 }
 
+func TestEventIDDeduplicatesAfterWindowExpires(t *testing.T) {
+	engine := alerts.New(time.Nanosecond)
+	event := sampleForDevice("motor-01", "critical")
+	event.EventID = "boot-1-sample-42"
+	first, err := engine.EvaluateWithError(event)
+	if err != nil || first == nil {
+		t.Fatalf("first alert = %+v, %v", first, err)
+	}
+	time.Sleep(time.Millisecond)
+	if retry, err := engine.EvaluateWithError(event); err != nil || retry != nil {
+		t.Fatalf("retry alert = %+v, %v; want no duplicate", retry, err)
+	}
+}
+
+func TestEventIDDedupRestoresAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.jsonl")
+	firstEngine, err := alerts.OpenStore(path, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := sampleForDevice("motor-01", "critical")
+	event.EventID = "boot-1-sample-42"
+	created, err := firstEngine.EvaluateWithError(event)
+	if err != nil || created == nil {
+		t.Fatalf("create alert = %+v, %v", created, err)
+	}
+	if err := firstEngine.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	secondEngine, err := alerts.OpenStore(path, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondEngine.Close()
+	time.Sleep(time.Millisecond)
+	if retry, err := secondEngine.EvaluateWithError(event); err != nil || retry != nil {
+		t.Fatalf("restart retry alert = %+v, %v; want no duplicate", retry, err)
+	}
+}
+
 func TestSeenIndexIsBoundedByAlertRetention(t *testing.T) {
 	engine := alerts.New(time.Hour)
 	for index := 0; index < 1100; index++ {
@@ -178,6 +219,46 @@ func TestSeenIndexIsBoundedByAlertRetention(t *testing.T) {
 	}
 	if alert := engine.Evaluate(sampleForDevice("motor-0000", "critical")); alert == nil {
 		t.Fatal("event older than the bounded retention window should no longer be deduplicated")
+	}
+}
+
+func TestEventIDDeduplicatesAlertBeyondTimeWindow(t *testing.T) {
+	engine := alerts.New(time.Nanosecond)
+	event := sampleForDevice("motor-01", "critical")
+	event.EventID = "boot-1-sample-42"
+	first, err := engine.EvaluateWithError(event)
+	if err != nil || first == nil {
+		t.Fatalf("first alert = %+v, %v", first, err)
+	}
+	time.Sleep(time.Millisecond)
+	if duplicate, err := engine.EvaluateWithError(event); err != nil || duplicate != nil {
+		t.Fatalf("retry alert = %+v, %v; want no duplicate", duplicate, err)
+	}
+}
+
+func TestEventIDDedupRestoresFromJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.jsonl")
+	first, err := alerts.OpenStore(path, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := sampleForDevice("motor-01", "critical")
+	event.EventID = "boot-1-sample-42"
+	created, err := first.EvaluateWithError(event)
+	if err != nil || created == nil {
+		t.Fatalf("create alert = %+v, %v", created, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := alerts.OpenStore(path, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	time.Sleep(time.Millisecond)
+	if duplicate, err := second.EvaluateWithError(event); err != nil || duplicate != nil {
+		t.Fatalf("restarted retry = %+v, %v; want no duplicate", duplicate, err)
 	}
 }
 

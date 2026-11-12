@@ -70,6 +70,7 @@ func (m *Metrics) observe(method, path string, status int) {
 
 func (m *Metrics) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.observe(r.Method, r.URL.Path, http.StatusOK)
 		m.mu.Lock()
 		keys := make([]string, 0, len(m.counts))
 		snapshot := make(map[string]int, len(m.counts))
@@ -114,7 +115,9 @@ func withLogging(metrics *Metrics, next http.Handler) http.Handler {
 		if rec.status == 0 {
 			rec.status = http.StatusOK
 		}
-		metrics.observe(r.Method, r.URL.Path, rec.status)
+		if normalizePath(r.URL.Path) != "/metrics" {
+			metrics.observe(r.Method, r.URL.Path, rec.status)
+		}
 		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Microsecond))
 	})
 }
