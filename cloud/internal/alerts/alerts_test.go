@@ -1,8 +1,13 @@
 package alerts_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,6 +208,42 @@ func TestEventIDDedupRestoresAfterRestart(t *testing.T) {
 	time.Sleep(time.Millisecond)
 	if retry, err := secondEngine.EvaluateWithError(event); err != nil || retry != nil {
 		t.Fatalf("restart retry alert = %+v, %v; want no duplicate", retry, err)
+	}
+}
+
+func TestEventDedupKeyUsesFixedLengthHash(t *testing.T) {
+	key := alerts.EventDedupKey(strings.Repeat("device", 128), strings.Repeat("event", 256))
+	if len(key) != sha256.Size*2 {
+		t.Fatalf("event key length = %d, want %d", len(key), sha256.Size*2)
+	}
+	if _, err := hex.DecodeString(key); err != nil {
+		t.Fatalf("event key is not hex: %v", err)
+	}
+}
+
+func TestLegacyEventKeyRestoresIntoHashedIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.jsonl")
+	legacyKey := "motor-01\x00boot-legacy"
+	record := map[string]any{
+		"type":      "dedup",
+		"event_key": legacyKey,
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(encoded, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := alerts.OpenStore(path, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	event := sampleForDevice("motor-01", "critical")
+	event.EventID = "boot-legacy"
+	if alert := engine.Evaluate(event); alert != nil {
+		t.Fatal("legacy plaintext dedup key was not restored")
 	}
 }
 

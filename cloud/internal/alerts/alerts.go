@@ -2,6 +2,8 @@ package alerts
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,7 +112,7 @@ func (e *Engine) load(file *os.File) error {
 				e.seen[record.SeenKey] = *record.SeenAt
 			}
 			if record.EventKey != "" {
-				e.eventSeen[record.EventKey] = struct{}{}
+				e.eventSeen[normalizeEventKey(record.EventKey)] = struct{}{}
 			}
 			e.addMemory(*record.Alert)
 		case "ack":
@@ -119,7 +121,7 @@ func (e *Engine) load(file *os.File) error {
 			if record.EventKey == "" {
 				return fmt.Errorf("dedup record has no event key")
 			}
-			e.eventSeen[record.EventKey] = struct{}{}
+			e.eventSeen[normalizeEventKey(record.EventKey)] = struct{}{}
 		default:
 			return fmt.Errorf("unknown alert journal record %q", record.Type)
 		}
@@ -248,13 +250,33 @@ type FaultEvent struct {
 	Fault   string
 }
 
+func hashEventKey(deviceID, eventID string) string {
+	if eventID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(deviceID + "\x00" + eventID))
+	return hex.EncodeToString(sum[:])
+}
+
+func EventDedupKey(deviceID, eventID string) string {
+	return hashEventKey(deviceID, eventID)
+}
+
+func normalizeEventKey(key string) string {
+	if strings.ContainsRune(key, '\x00') {
+		sum := sha256.Sum256([]byte(key))
+		return hex.EncodeToString(sum[:])
+	}
+	return key
+}
+
 func (e *Engine) planAlert(eventID, deviceID, metric, level string, value float64, message string, now time.Time,
 	seenEvents map[string]struct{}, seenWindow map[string]time.Time, newEvents map[string]struct{},
 	records *[]journalRecord, alerts *[]Alert) error {
 	key := deviceID + "|" + metric + "|" + level
 	eventKey := ""
 	if eventID != "" {
-		eventKey = deviceID + "\x00" + eventID
+		eventKey = hashEventKey(deviceID, eventID)
 		if _, exists := e.eventSeen[eventKey]; exists {
 			return nil
 		}
