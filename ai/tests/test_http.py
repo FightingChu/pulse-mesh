@@ -32,6 +32,22 @@ class HTTPTest(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(json.load(resp), {"status": "ok"})
 
+    def test_unknown_get_route_is_not_found(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(self.base + "/unknown", timeout=5)
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_unknown_post_route_is_not_found(self):
+        req = urllib.request.Request(
+            self.base + "/unknown",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(ctx.exception.code, 404)
+
     def test_post_assess_critical(self):
         body = json.dumps({
             "event_id": "boot-1-spectrum-0",

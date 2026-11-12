@@ -57,7 +57,7 @@ class H(BaseHTTPRequestHandler):
         if urlparse(self.path).path in ('/health', '/health/live'):
             self._send({'status': 'ok'})
         else:
-            self._send(assess('motor-01', 'vibration_rms', [1.1, 1.2, 1.0, 1.3, 1.2, 4.8]))
+            self._send({'error': 'not found'}, 404)
     def do_POST(self):
         try:
             n = int(self.headers.get('Content-Length', 0))
@@ -84,7 +84,10 @@ class H(BaseHTTPRequestHandler):
                 )
                 self._send(result)
                 return
-            self._send(assess(body.get('device_id', 'unknown'), body.get('metric', 'vibration_rms'), body.get('values', [])))
+            if path == '/assess':
+                self._send(assess(body.get('device_id', 'unknown'), body.get('metric', 'vibration_rms'), body.get('values', [])))
+                return
+            self._send({'error': 'not found'}, 404)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             self._send({'error': str(exc)}, 400)
     def _send(self, obj, status=200):
