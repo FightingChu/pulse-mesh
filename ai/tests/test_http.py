@@ -176,6 +176,41 @@ class HTTPTest(unittest.TestCase):
             urllib.request.urlopen(req, timeout=10)
         self.assertEqual(ctx.exception.code, 400)
 
+    def test_post_spectrum_rejects_low_sample_rate(self):
+        body = json.dumps({
+            "device_id": "motor-01",
+            "values": [0.0] * 1024,
+            "sample_rate_hz": 200,
+            "rotation_hz": 25,
+        }).encode()
+        req = urllib.request.Request(
+            self.base + "/spectrum",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_post_spectrum_requires_string_identity(self):
+        for patch in ({"device_id": ""}, {"event_id": []}):
+            payload = {
+                "device_id": "motor-01",
+                "event_id": "boot-1-spectrum-0",
+                "values": [0.0] * 1024,
+            }
+            payload.update(patch)
+            req = urllib.request.Request(
+                self.base + "/spectrum",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=10)
+            self.assertEqual(ctx.exception.code, 400)
+
     def test_post_rejects_multiple_json_values(self):
         req = urllib.request.Request(
             self.base + "/assess",

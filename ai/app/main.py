@@ -11,6 +11,7 @@ WARN_Z = 3.0
 CRITICAL_Z = 6.0
 MAX_BODY_BYTES = 128 * 1024
 MAX_WAVEFORM_VALUES = 1024
+MIN_DIAGNOSIS_SAMPLE_RATE_HZ = 240.0
 DEFAULT_MAX_WORKERS = 8
 MAX_WORKERS_LIMIT = 64
 REQUEST_TIMEOUT_SECONDS = 5
@@ -43,11 +44,15 @@ def assess(device_id, metric, values):
     return {'device_id': device_id, 'metric': metric, 'last': last, 'rms': rms(values), 'z': round(z, 3), 'level': level_of(z)}
 
 def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0, event_id=''):
+    if not isinstance(device_id, str) or not device_id or len(device_id) > 64:
+        raise ValueError('device_id must be a non-empty string of at most 64 characters')
+    if not isinstance(event_id, str) or len(event_id) > 128:
+        raise ValueError('event_id must be a string of at most 128 characters')
     if len(values) != MAX_WAVEFORM_VALUES:
         raise ValueError('values must contain exactly 1024 samples')
     if not math.isfinite(sample_rate_hz) or not math.isfinite(rotation_hz):
         raise ValueError('sample and rotation frequencies must be finite')
-    if sample_rate_hz <= 0 or rotation_hz < 0 or sample_rate_hz < 2 * rotation_hz:
+    if sample_rate_hz < MIN_DIAGNOSIS_SAMPLE_RATE_HZ or rotation_hz < 0 or sample_rate_hz < 2 * rotation_hz:
         raise ValueError('invalid sample_rate_hz or rotation_hz')
     if any(not math.isfinite(v) for v in values):
         raise ValueError('waveform values must be finite numbers')
