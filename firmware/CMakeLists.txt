@@ -5,9 +5,11 @@ enable_testing()
 
 add_executable(pulse_firmware src/main.cpp src/sensor.cpp)
 target_include_directories(pulse_firmware PRIVATE include)
+target_compile_options(pulse_firmware PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Werror>)
 
 add_executable(pulse_firmware_test test/test_sensor.cpp src/sensor.cpp)
 target_include_directories(pulse_firmware_test PRIVATE include)
+target_compile_options(pulse_firmware_test PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Werror>)
 add_test(NAME sensor_spectrum COMMAND pulse_firmware_test)
 
 if(MINGW)
