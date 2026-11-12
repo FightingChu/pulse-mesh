@@ -1,6 +1,8 @@
 package journal
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 )
 
 const scanChunk = 4096
+const maxJournalRecordBytes = 2 * 1024 * 1024
 const MaxJournalBytes = 256 * 1024 * 1024
 
 var appendLocks sync.Map
@@ -53,6 +56,25 @@ func RepairIncompleteTail(file *os.File) (bool, error) {
 		for i := length - 1; i >= 0; i-- {
 			if buffer[i] == '\n' {
 				truncateAt := start + int64(i) + 1
+				tailLength := size - truncateAt
+				if tailLength > 0 && tailLength <= maxJournalRecordBytes {
+					tail := make([]byte, int(tailLength))
+					if _, err := file.ReadAt(tail, truncateAt); err != nil && !errors.Is(err, io.EOF) {
+						return false, err
+					}
+					if json.Valid(bytes.TrimSpace(tail)) {
+						if _, err := file.Seek(0, io.SeekEnd); err != nil {
+							return false, err
+						}
+						if _, err := file.Write([]byte{'\n'}); err != nil {
+							return false, err
+						}
+						if err := file.Sync(); err != nil {
+							return false, err
+						}
+						return true, nil
+					}
+				}
 				if err := file.Truncate(truncateAt); err != nil {
 					return false, err
 				}

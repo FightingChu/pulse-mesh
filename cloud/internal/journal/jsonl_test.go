@@ -142,6 +142,29 @@ func TestRepairIncompleteOnlyRecordTruncatesFile(t *testing.T) {
 	}
 }
 
+func TestRepairAddsNewlineToCompleteJSONTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path, []byte("{\"ok\":1}\n{\"last\":2}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	repaired, err := journal.RepairIncompleteTail(file)
+	if err != nil || !repaired {
+		t.Fatalf("repair = %v, %v", repaired, err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "{\"ok\":1}\n{\"last\":2}\n" {
+		t.Fatalf("content = %q", content)
+	}
+}
+
 func TestRepairCompleteFileDoesNothing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
