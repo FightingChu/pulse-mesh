@@ -334,6 +334,12 @@ func validateSample(s ingest.Sample) error {
 	if s.DeviceID == "" || s.Metric == "" {
 		return errors.New("device_id and metric are required")
 	}
+	if len(s.DeviceID) > 64 || len(s.Metric) > 64 || len(s.EventID) > 128 {
+		return errors.New("device_id and metric must be at most 64 characters; event_id must be at most 128 characters")
+	}
+	if strings.ContainsAny(s.DeviceID+s.Metric+s.EventID, "\r\n\x00") {
+		return errors.New("sample identifiers must not contain control characters")
+	}
 	if !finite(s.Value) || !finite(s.TempC) || (s.Level != "" && s.Level != "normal" && s.Level != "warning" && s.Level != "critical") {
 		return errors.New("invalid sample values or level")
 	}

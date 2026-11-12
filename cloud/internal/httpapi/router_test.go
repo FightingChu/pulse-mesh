@@ -269,6 +269,7 @@ func TestPostRejectsInvalidSampleFields(t *testing.T) {
 		`{"device_id":"motor-01","metric":"vibration_rms","value":1,"level":"urgent"}`,
 		`{"device_id":"motor-01","metric":"vibration_rms","value":NaN}`,
 		`{"device_id":"motor-01","metric":"vibration_rms","value":1} {}`,
+		`{"device_id":"motor-01","metric":"vibration_rms","event_id":"` + strings.Repeat("x", 129) + `","value":1}`,
 	}
 	for _, payload := range cases {
 		resp, err := http.Post(srv.URL+"/api/v1/samples", "application/json", strings.NewReader(payload))
@@ -279,6 +280,33 @@ func TestPostRejectsInvalidSampleFields(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("payload %q status = %d, want 400", payload, resp.StatusCode)
 		}
+	}
+}
+
+func TestBatchRejectsControlCharactersBeforeWriting(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	payload := `[{"event_id":"batch-1","device_id":"motor-01","metric":"v","value":1},{"event_id":"batch-2","device_id":"motor-02\u0000bad","metric":"v","value":2}]`
+	resp, err := http.Post(srv.URL+"/api/v1/samples/batch", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	resp, err = http.Get(srv.URL + "/api/v1/samples?device=motor-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var stored []ingest.Sample
+	if err := json.NewDecoder(resp.Body).Decode(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("invalid batch partially wrote %d records", len(stored))
 	}
 }
 
