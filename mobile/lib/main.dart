@@ -480,17 +480,28 @@ class _DiagnosesViewState extends State<DiagnosesView> {
                             : diagnosis.fault == 'imbalance' || diagnosis.fault == 'looseness'
                                 ? 'warning'
                                 : 'critical';
-                        return ListTile(
-                          leading: Icon(levelIcon(faultLevel), color: levelColor(faultLevel)),
-                          title: Text('${diagnosis.deviceId} · ${diagnosis.fault}'),
-                          subtitle: Text(
-                            '主频 ${diagnosis.dominantHz.toStringAsFixed(1)} Hz  '
-                            '低/中/高频 ${diagnosis.lowBand.toStringAsFixed(2)} / '
-                            '${diagnosis.midBand.toStringAsFixed(2)} / '
-                            '${diagnosis.highBand.toStringAsFixed(2)}\n'
-                            '${diagnosis.diagnosedAt}',
+                        return Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(levelIcon(faultLevel), color: levelColor(faultLevel)),
+                                  title: Text('${diagnosis.deviceId} · ${diagnosis.fault}'),
+                                  subtitle: Text(diagnosis.diagnosedAt),
+                                ),
+                                Text(
+                                  '主频 ${diagnosis.dominantHz.toStringAsFixed(1)} Hz',
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 8),
+                                _SpectrumBands(diagnosis: diagnosis),
+                              ],
+                            ),
                           ),
-                          isThreeLine: true,
                         );
                       },
                     ),
@@ -500,4 +511,60 @@ class _DiagnosesViewState extends State<DiagnosesView> {
       ),
     );
   }
+}
+
+class _SpectrumBands extends StatelessWidget {
+  const _SpectrumBands({required this.diagnosis});
+
+  final Diagnosis diagnosis;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final bands = [
+      _SpectrumBand('低频', diagnosis.lowBand, colors.primary),
+      _SpectrumBand('中频', diagnosis.midBand, const Color(0xFFEF6C00)),
+      _SpectrumBand('高频', diagnosis.highBand, const Color(0xFFC62828)),
+    ];
+    return Column(
+      children: [
+        for (final band in bands)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(
+              children: [
+                SizedBox(width: 42, child: Text(band.label)),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: band.ratio.clamp(0.0, 1.0),
+                      minHeight: 10,
+                      color: band.color,
+                      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 52,
+                  child: Text('${(band.ratio * 100).toStringAsFixed(1)}%', textAlign: TextAlign.end),
+                ),
+              ],
+            ),
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text('峰值幅度 ${diagnosis.peakAmplitude.toStringAsFixed(3)}'),
+        ),
+      ],
+    );
+  }
+}
+
+class _SpectrumBand {
+  const _SpectrumBand(this.label, this.ratio, this.color);
+
+  final String label;
+  final double ratio;
+  final Color color;
 }
