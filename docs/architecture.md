@@ -53,7 +53,8 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - Rust HTTP 客户端设置 5s 读写超时，只接受 2xx 作为成功；未知路由在连接前拒绝。
 - 网关事件带 event_id，样本、诊断和由其触发的告警以 device_id + event_id 幂等；同一事件即使超过告警时间去重窗口或服务重启，也不会重复生成告警。
 - 永久告警事件索引以 device_id + event_id 的 SHA-256 定长摘要保存，旧 JSONL 明文键启动时兼容迁移到摘要。
-- 幂等记录跟随各自内存保留窗口，云端重启后不持久；需要跨重启保证时应替换为持久化存储。
+- 持久化模式完整重放样本和诊断 event_id；运行时去重 map 和展示记录有界，重启后仍可识别 journal 中历史事件。
+- 告警 event_id journal 也完整重放；内存永久去重索引使用固定 32 字节摘要，避免保留完整设备和事件字符串。
 - 设置 PULSE_DATA_DIR 后，云端将样本、诊断、告警分别写入 samples.jsonl、diagnoses.jsonl、alerts.jsonl；启动时恢复记录、event_id 索引、告警 ack 与去重窗口；Docker Compose 和 Helm 默认挂载持久卷。
 - JSONL 后端是单副本写入模式；Kubernetes 使用 Recreate 和一个 RWO 持久卷，不能直接扩为多副本。
 - 设置 PULSE_DATA_DIR 时，云端获取 OS 独占锁；第二个进程不能同时打开同一数据目录，进程崩溃后锁由操作系统自动释放。

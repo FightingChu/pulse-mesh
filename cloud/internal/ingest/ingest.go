@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,12 +28,12 @@ type Sample struct {
 type Store struct {
 	mu           sync.Mutex
 	items        []Sample
-	seen         map[string]struct{}
+	seen         map[[sha256.Size]byte]struct{}
 	file         *os.File
 	writesFailed uint64
 }
 
-func NewStore() *Store { return &Store{seen: make(map[string]struct{})} }
+func NewStore() *Store { return &Store{seen: make(map[[sha256.Size]byte]struct{})} }
 
 func OpenStore(path string) (*Store, error) {
 	if path == "" {
@@ -49,7 +50,7 @@ func OpenStore(path string) (*Store, error) {
 		_ = file.Close()
 		return nil, fmt.Errorf("repair sample store: %w", err)
 	}
-	store := &Store{seen: make(map[string]struct{}), file: file}
+	store := &Store{seen: make(map[[sha256.Size]byte]struct{}), file: file}
 	if err := store.load(file); err != nil {
 		_ = file.Close()
 		return nil, err
@@ -82,7 +83,7 @@ func (s *Store) load(file *os.File) error {
 
 func (s *Store) addMemory(v Sample) bool {
 	key := eventKey(v.DeviceID, v.EventID)
-	if key != "" {
+	if v.EventID != "" {
 		if _, exists := s.seen[key]; exists {
 			return false
 		}
@@ -91,7 +92,8 @@ func (s *Store) addMemory(v Sample) bool {
 	s.items = append(s.items, v)
 	if len(s.items) > 10000 {
 		removed := s.items[0]
-		if removedKey := eventKey(removed.DeviceID, removed.EventID); removedKey != "" {
+		if removed.EventID != "" {
+			removedKey := eventKey(removed.DeviceID, removed.EventID)
 			delete(s.seen, removedKey)
 		}
 		s.items = s.items[len(s.items)-10000:]
@@ -121,11 +123,11 @@ func (s *Store) AddBatch(samples []Sample) ([]bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	added := make([]bool, len(prepared))
-	batchSeen := make(map[string]struct{}, len(prepared))
+	batchSeen := make(map[[sha256.Size]byte]struct{}, len(prepared))
 	encoded := make([][]byte, 0, len(prepared))
 	for i, sample := range prepared {
 		key := eventKey(sample.DeviceID, sample.EventID)
-		if key != "" {
+		if sample.EventID != "" {
 			if _, exists := s.seen[key]; exists {
 				continue
 			}
@@ -164,11 +166,11 @@ func (s *Store) AddBatch(samples []Sample) ([]bool, error) {
 	return added, nil
 }
 
-func eventKey(deviceID, eventID string) string {
+func eventKey(deviceID, eventID string) [sha256.Size]byte {
 	if eventID == "" {
-		return ""
+		return [sha256.Size]byte{}
 	}
-	return deviceID + "\x00" + eventID
+	return sha256.Sum256([]byte(deviceID + "\x00" + eventID))
 }
 
 func (s *Store) Stats() (int, int64, uint64) {

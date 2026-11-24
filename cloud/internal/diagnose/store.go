@@ -2,6 +2,7 @@ package diagnose
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +18,7 @@ type Store struct {
 	mu           sync.Mutex
 	items        []Result
 	limit        int
-	seen         map[string]struct{}
+	seen         map[[sha256.Size]byte]struct{}
 	file         *os.File
 	writesFailed uint64
 }
@@ -26,7 +27,7 @@ func NewStore(limit int) *Store {
 	if limit <= 0 {
 		limit = 1000
 	}
-	return &Store{limit: limit, seen: make(map[string]struct{})}
+	return &Store{limit: limit, seen: make(map[[sha256.Size]byte]struct{})}
 }
 
 func OpenStore(path string, limit int) (*Store, error) {
@@ -78,7 +79,7 @@ func (s *Store) load(file *os.File) error {
 
 func (s *Store) addMemory(r Result) bool {
 	key := resultKey(r.DeviceID, r.EventID)
-	if key != "" {
+	if r.EventID != "" {
 		if _, exists := s.seen[key]; exists {
 			return false
 		}
@@ -87,7 +88,8 @@ func (s *Store) addMemory(r Result) bool {
 	s.items = append(s.items, r)
 	if len(s.items) > s.limit {
 		removed := s.items[0]
-		if removedKey := resultKey(removed.DeviceID, removed.EventID); removedKey != "" {
+		if removed.EventID != "" {
+			removedKey := resultKey(removed.DeviceID, removed.EventID)
 			delete(s.seen, removedKey)
 		}
 		s.items = s.items[len(s.items)-s.limit:]
@@ -99,7 +101,7 @@ func (s *Store) Add(r Result) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := resultKey(r.DeviceID, r.EventID)
-	if key != "" {
+	if r.EventID != "" {
 		if _, exists := s.seen[key]; exists {
 			return false, nil
 		}
@@ -120,10 +122,10 @@ func (s *Store) Add(r Result) (bool, error) {
 }
 
 func (s *Store) Get(device, eventID string) (Result, bool) {
-	key := resultKey(device, eventID)
-	if key == "" {
+	if eventID == "" {
 		return Result{}, false
 	}
+	key := resultKey(device, eventID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := len(s.items) - 1; i >= 0; i-- {
@@ -134,11 +136,11 @@ func (s *Store) Get(device, eventID string) (Result, bool) {
 	return Result{}, false
 }
 
-func resultKey(deviceID, eventID string) string {
+func resultKey(deviceID, eventID string) [sha256.Size]byte {
 	if eventID == "" {
-		return ""
+		return [sha256.Size]byte{}
 	}
-	return deviceID + "\x00" + eventID
+	return sha256.Sum256([]byte(deviceID + "\x00" + eventID))
 }
 
 func (s *Store) List(device string, limit int) []Result {
