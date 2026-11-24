@@ -6,6 +6,18 @@ import 'package:http/testing.dart';
 import 'package:pulse_mesh_mobile/api.dart';
 
 void main() {
+  test('API base validation rejects user info and unsupported schemes', () {
+    expect(() => parseApiBase('https://user:pass@example.com'), throwsFormatException);
+    expect(() => parseApiBase('ftp://example.com'), throwsFormatException);
+    expect(parseApiBase('http://10.0.2.2:8080', isRelease: true), throwsFormatException);
+    expect(parseApiBase('https://example.com/base').scheme, 'https');
+  });
+
+  test('API URI builder preserves configured base path', () {
+    final uri = buildApiUri('https://example.com/pulse/', '/api/v1/samples');
+    expect(uri.toString(), 'https://example.com/pulse/api/v1/samples');
+  });
+
   test('samples decodes the API payload', () async {
     final client = ApiClient(MockClient((request) async {
       expect(request.url.path, '/api/v1/samples');

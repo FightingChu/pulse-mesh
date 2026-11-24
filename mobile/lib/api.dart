@@ -7,6 +7,33 @@ const String apiBase = String.fromEnvironment(
   defaultValue: 'http://10.0.2.2:8080',
 );
 
+Uri get apiBaseUri {
+  return parseApiBase(apiBase);
+}
+
+Uri parseApiBase(String value, {bool isRelease = const bool.fromEnvironment('dart.vm.product')}) {
+  final uri = Uri.tryParse(value);
+  if (uri == null || !uri.hasAuthority || uri.host.isEmpty || uri.userInfo.isNotEmpty) {
+    throw const FormatException('PULSE_API must be an absolute HTTP or HTTPS URL');
+  }
+  if (uri.scheme != 'http' && uri.scheme != 'https') {
+    throw const FormatException('PULSE_API scheme must be HTTP or HTTPS');
+  }
+  if (isRelease && uri.scheme != 'https') {
+    throw const FormatException('Release builds require an HTTPS PULSE_API URL');
+  }
+  return uri;
+}
+
+Uri buildApiUri(String baseUrl, String path, [Map<String, String>? query]) {
+  final base = parseApiBase(baseUrl);
+  final basePath = base.path.endsWith('/') ? base.path.substring(0, base.path.length - 1) : base.path;
+  final requestPath = path.startsWith('/') ? path : '/$path';
+  return base.replace(path: '$basePath$requestPath', queryParameters: query);
+}
+
+Uri apiUri(String path, [Map<String, String>? query]) => buildApiUri(apiBase, path, query);
+
 class Sample {
   final String deviceId;
   final String metric;
@@ -138,7 +165,7 @@ class ApiClient {
 
   Future<List<Sample>> samples() async {
     final resp = await _client
-        .get(Uri.parse('$apiBase/api/v1/samples'))
+        .get(apiUri('/api/v1/samples'))
         .timeout(const Duration(seconds: 5));
     final data = _decodeSuccess(resp) as List<dynamic>;
     return data
@@ -147,9 +174,9 @@ class ApiClient {
   }
 
   Future<List<AlertItem>> alerts({bool includeAcked = false}) async {
-    final query = includeAcked ? '?include_acked=1' : '';
+    final query = includeAcked ? {'include_acked': '1'} : null;
     final resp = await _client
-        .get(Uri.parse('$apiBase/api/v1/alerts$query'))
+        .get(apiUri('/api/v1/alerts', query))
         .timeout(const Duration(seconds: 5));
     final data = _decodeSuccess(resp) as List<dynamic>;
     return data
@@ -164,7 +191,7 @@ class ApiClient {
     final query = <String, String>{'limit': '$limit'};
     if (device.isNotEmpty) query['device'] = device;
     final response = await _client
-        .get(Uri.parse('$apiBase/api/v1/diagnoses').replace(queryParameters: query))
+        .get(apiUri('/api/v1/diagnoses', query))
         .timeout(const Duration(seconds: 5));
     final data = _decodeSuccess(response) as List<dynamic>;
     return data
@@ -178,7 +205,7 @@ class ApiClient {
     }
     final encodedId = Uri.encodeComponent(id);
     final response = await _client
-        .post(Uri.parse('$apiBase/api/v1/alerts/$encodedId/ack'))
+        .post(apiUri('/api/v1/alerts/$encodedId/ack'))
         .timeout(const Duration(seconds: 5));
     _decodeSuccess(response);
   }

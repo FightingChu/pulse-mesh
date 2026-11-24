@@ -108,4 +108,4 @@ cd mobile
 flutter pub get
 flutter run --dart-define=PULSE_API=http://10.0.2.2:8080
 ```
-真机调试时将 `PULSE_API` 指向电脑局域网地址并使用 HTTPS；release 构建必须传入 HTTPS API 地址。
+真机调试时将 `PULSE_API` 指向电脑局域网地址并使用 HTTPS；release 构建传入 `--dart-define=PULSE_API=https://api.example.com`，代码会拒绝 HTTP。
