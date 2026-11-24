@@ -60,6 +60,17 @@ class AlertItem {
       acked: json['acked'] as bool? ?? false,
     );
   }
+
+  AlertItem copyWith({bool? acked}) {
+    return AlertItem(
+      id: id,
+      deviceId: deviceId,
+      metric: metric,
+      level: level,
+      message: message,
+      acked: acked ?? this.acked,
+    );
+  }
 }
 
 class ApiClient {
