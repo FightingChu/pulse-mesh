@@ -28,6 +28,7 @@
 - 持久化日志单文件 256 MiB 上限；Prometheus 监控记录数、日志大小和写失败数
 - `ai/` Python 3.14 stdlib-only，z-score 异常检测 + FFT 频谱故障分类
 - `mobile/` Flutter，样本列表 + 离线状态
+- `mobile/android/` Android INTERNET 权限与网络安全配置；debug 仅允许模拟器访问 `10.0.2.2` 明文 HTTP，release 默认要求 HTTPS
 - `infra/` docker-compose + K8s Deployment
 - `tools/verify.ps1` 一键跑全部检查
 - `docs/dev-setup.md` 工具链安装 + 中文路径坑
@@ -105,5 +106,6 @@ Flutter 补齐后：
 ```
 cd mobile
 flutter pub get
-flutter run
+flutter run --dart-define=PULSE_API=http://10.0.2.2:8080
 ```
+真机调试时将 `PULSE_API` 指向电脑局域网地址并使用 HTTPS；release 构建必须传入 HTTPS API 地址。
