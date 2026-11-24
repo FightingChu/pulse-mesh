@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 static_assert(sizeof(SpectrumWorkspace) == kMaxSpectrumSamples * 2 * sizeof(float));
@@ -48,6 +49,15 @@ int main() {
   expect_near("workspace reuse dominant", reused.dominant_hz, 25.0, 2.0);
   expect_near("workspace reuse amplitude", reused.peak_amplitude, 1.0, 0.1);
 
+  std::vector<double> biased_sine(1024);
+  for (std::size_t i = 0; i < biased_sine.size(); i++) {
+    biased_sine[i] = 1000000000000.0 +
+                     std::sin(2.0 * 3.14159265358979323846 * 25.0 * (double)i / 1000.0);
+  }
+  Spectrum biased = analyze_spectrum(biased_sine.data(), biased_sine.size(), 1000.0, workspace);
+  expect_near("large DC offset dominant", biased.dominant_hz, 25.0, 2.0);
+  expect_near("large DC offset amplitude", biased.peak_amplitude, 1.0, 0.1);
+
   std::vector<double> doubled(1024);
   for (std::size_t i = 0; i < doubled.size(); i++) {
     doubled[i] = std::sin(2.0 * 3.14159265358979323846 * 50.0 * (double)i / 1000.0);
@@ -74,6 +84,10 @@ int main() {
   double invalid[] = {0.0, 1.0, NAN, 2.0};
   Spectrum invalid_result = analyze_spectrum(invalid, 4, 1000.0, workspace);
   expect_near("non-finite spectrum rejected", invalid_result.peak_amplitude, 0.0, 1e-9);
+
+  double out_of_range[] = {0.0, std::numeric_limits<double>::max(), 0.0, 0.0};
+  Spectrum range_result = analyze_spectrum(out_of_range, 4, 1000.0, workspace);
+  expect_near("float workspace overflow rejected", range_result.peak_amplitude, 0.0, 1e-9);
 
   if (failures != 0) {
     std::printf("%d checks failed\n", failures);

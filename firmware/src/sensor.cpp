@@ -1,5 +1,6 @@
 #include "sensor.h"
 #include <cmath>
+#include <limits>
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
@@ -83,11 +84,13 @@ Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_ra
   double mean = 0.0;
   for (std::size_t i = 0; i < n; i++) {
     if (!std::isfinite(samples[i])) return out;
-    mean += samples[i];
+    mean += (samples[i] - mean) / (double)(i + 1);
   }
-  mean /= (double)n;
+  const double float_limit = (double)std::numeric_limits<float>::max();
   for (std::size_t i = 0; i < n; i++) {
-    workspace.real[i] = (float)(samples[i] - mean);
+    const double centered = samples[i] - mean;
+    if (!std::isfinite(centered) || std::fabs(centered) > float_limit) return out;
+    workspace.real[i] = (float)centered;
     workspace.imaginary[i] = 0.0f;
   }
 
