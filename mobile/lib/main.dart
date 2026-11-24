@@ -125,9 +125,19 @@ class _SamplesViewState extends State<SamplesView> {
   @override
   Widget build(BuildContext context) {
     final devices = samples.map((sample) => sample.deviceId).toSet().toList()..sort();
-    final visibleSamples = selectedDevice == null
-        ? samples
-        : samples.where((sample) => sample.deviceId == selectedDevice).toList();
+    final visibleSamples = (selectedDevice == null
+            ? samples
+            : samples.where((sample) => sample.deviceId == selectedDevice))
+        .toList();
+    final latestByDevice = <String, Sample>{};
+    for (final sample in visibleSamples) {
+      final current = latestByDevice[sample.deviceId];
+      if (current == null || _sampleTime(sample).isAfter(_sampleTime(current))) {
+        latestByDevice[sample.deviceId] = sample;
+      }
+    }
+    final latestSamples = latestByDevice.values.toList()
+      ..sort((left, right) => left.deviceId.compareTo(right.deviceId));
     return Scaffold(
       floatingActionButton: FloatingActionButton(
         onPressed: loading ? null : load,
@@ -171,6 +181,49 @@ class _SamplesViewState extends State<SamplesView> {
               ],
             ),
           ),
+          if (latestSamples.isNotEmpty)
+            SizedBox(
+              height: 116,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                scrollDirection: Axis.horizontal,
+                itemCount: latestSamples.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final latest = latestSamples[index];
+                  return SizedBox(
+                    width: 190,
+                    child: Card(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () => setState(() => selectedDevice = latest.deviceId),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(latest.deviceId, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(levelIcon(latest.level), color: levelColor(latest.level)),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${latest.value.toStringAsFixed(2)} · ${latest.level}',
+                                    style: TextStyle(color: levelColor(latest.level)),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: load,
@@ -211,6 +264,8 @@ class _SamplesViewState extends State<SamplesView> {
     );
   }
 }
+
+DateTime _sampleTime(Sample sample) => DateTime.tryParse(sample.ts) ?? DateTime.fromMillisecondsSinceEpoch(0);
 
 class AlertsView extends StatefulWidget {
   const AlertsView({super.key});
