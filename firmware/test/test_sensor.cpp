@@ -6,10 +6,12 @@
 #include <limits>
 #include <vector>
 
-static_assert(sizeof(SpectrumWorkspace) == kMaxSpectrumSamples * 2 * sizeof(float));
+static_assert(sizeof(SpectrumWorkspace) ==
+              (kMaxSpectrumSamples * 2 + kFftTwiddleChunk * 2) * sizeof(float));
 
 namespace {
 int failures = 0;
+constexpr double kPiTest = 3.14159265358979323846;
 
 void expect_near(const char* name, double got, double want, double tol) {
   if (std::fabs(got - want) > tol) {
@@ -31,6 +33,23 @@ void expect_str(const char* name, const char* got, const char* want) {
 }  // namespace
 
 int main() {
+  const double reference_input[] = {1.0, 0.0, -1.0, 0.0, 2.0, 0.0, -2.0, 0.0};
+  float fft_real[8];
+  for (std::size_t i = 0; i < 8; i++) fft_real[i] = (float)reference_input[i];
+  float fft_imaginary[8]{};
+  fft_radix2(fft_real, fft_imaginary, 8);
+  for (std::size_t k = 0; k < 8; k++) {
+    double expected_real = 0.0;
+    double expected_imaginary = 0.0;
+    for (std::size_t sample = 0; sample < 8; sample++) {
+      const double phase = -2.0 * kPiTest * (double)(k * sample) / 8.0;
+      expected_real += reference_input[sample] * std::cos(phase);
+      expected_imaginary += reference_input[sample] * std::sin(phase);
+    }
+    expect_near("radix2 real vs DFT", fft_real[k], expected_real, 1e-5);
+    expect_near("radix2 imaginary vs DFT", fft_imaginary[k], expected_imaginary, 1e-5);
+  }
+
   float window[9];
   for (float& sample : window) sample = 1.0f;
   hann_window(window, 9);

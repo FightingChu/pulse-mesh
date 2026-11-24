@@ -22,7 +22,7 @@ int main() {
   constexpr std::size_t kN = 1024;
   constexpr double kSampleRate = 1000.0;
   constexpr double kRotation = 25.0;
-  double wave[kN];
+  static double wave[kN];
   static SpectrumWorkspace workspace;
   synthesize_waveform(wave, kN, kSampleRate, kRotation, 0.6);
   Spectrum s = analyze_spectrum(wave, kN, kSampleRate, workspace);

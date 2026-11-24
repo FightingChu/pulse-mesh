@@ -6,6 +6,61 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr std::size_t kHannReanchorInterval = 32;
 bool is_power_of_two(std::size_t n) { return n >= 2 && (n & (n - 1)) == 0; }
+
+void fft_radix2_impl(float* re, float* im, std::size_t n, float* twiddle_real,
+                     float* twiddle_imaginary) {
+  if (!is_power_of_two(n)) return;
+
+  for (std::size_t i = 1, j = 0; i < n; i++) {
+    std::size_t bit = n >> 1;
+    for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      std::swap(re[i], re[j]);
+      std::swap(im[i], im[j]);
+    }
+  }
+
+  for (std::size_t len = 2; len <= n; len <<= 1) {
+    const std::size_t half = len / 2;
+    const double angle_step = -2.0 * kPi / (double)len;
+    const double step_real = std::cos(angle_step);
+    const double step_imaginary = std::sin(angle_step);
+    for (std::size_t chunk_start = 0; chunk_start < half;
+         chunk_start += kFftTwiddleChunk) {
+      const std::size_t chunk_length =
+          (half - chunk_start < kFftTwiddleChunk) ? half - chunk_start : kFftTwiddleChunk;
+      const double start_angle = angle_step * (double)chunk_start;
+      double twiddle_real_value = std::cos(start_angle);
+      double twiddle_imaginary_value = std::sin(start_angle);
+      for (std::size_t offset = 0; offset < chunk_length; offset++) {
+        twiddle_real[offset] = (float)twiddle_real_value;
+        twiddle_imaginary[offset] = (float)twiddle_imaginary_value;
+        const double next_real = twiddle_real_value * step_real -
+                                 twiddle_imaginary_value * step_imaginary;
+        twiddle_imaginary_value = twiddle_real_value * step_imaginary +
+                                  twiddle_imaginary_value * step_real;
+        twiddle_real_value = next_real;
+      }
+
+      for (std::size_t group = 0; group < n; group += len) {
+        for (std::size_t offset = 0; offset < chunk_length; offset++) {
+          const std::size_t k = chunk_start + offset;
+          const std::size_t a = group + k;
+          const std::size_t b = a + half;
+          const float w_real = twiddle_real[offset];
+          const float w_imaginary = twiddle_imaginary[offset];
+          const float value_real = re[b] * w_real - im[b] * w_imaginary;
+          const float value_imaginary = re[b] * w_imaginary + im[b] * w_real;
+          re[b] = re[a] - value_real;
+          im[b] = im[a] - value_imaginary;
+          re[a] += value_real;
+          im[a] += value_imaginary;
+        }
+      }
+    }
+  }
+}
 }  // namespace
 
 double compute_rms(const double* v, std::size_t n) {
@@ -48,40 +103,13 @@ void hann_window(float* x, std::size_t n) {
 }
 
 void fft_radix2(float* re, float* im, std::size_t n) {
-  if (!is_power_of_two(n)) return;
+  std::array<float, kFftTwiddleChunk> twiddle_real{};
+  std::array<float, kFftTwiddleChunk> twiddle_imaginary{};
+  fft_radix2_impl(re, im, n, twiddle_real.data(), twiddle_imaginary.data());
+}
 
-  for (std::size_t i = 1, j = 0; i < n; i++) {
-    std::size_t bit = n >> 1;
-    for (; (j & bit) != 0; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) {
-      std::swap(re[i], re[j]);
-      std::swap(im[i], im[j]);
-    }
-  }
-
-  for (std::size_t len = 2; len <= n; len <<= 1) {
-    const double angle = -2.0 * kPi / (double)len;
-    const float wlen_re = (float)std::cos(angle);
-    const float wlen_im = (float)std::sin(angle);
-    for (std::size_t i = 0; i < n; i += len) {
-      float w_re = 1.0f;
-      float w_im = 0.0f;
-      for (std::size_t k = 0; k < len / 2; k++) {
-        const std::size_t a = i + k;
-        const std::size_t b = a + len / 2;
-        const float v_re = re[b] * w_re - im[b] * w_im;
-        const float v_im = re[b] * w_im + im[b] * w_re;
-        re[b] = re[a] - v_re;
-        im[b] = im[a] - v_im;
-        re[a] += v_re;
-        im[a] += v_im;
-        const float next_re = w_re * wlen_re - w_im * wlen_im;
-        w_im = w_re * wlen_im + w_im * wlen_re;
-        w_re = next_re;
-      }
-    }
-  }
+void fft_radix2(float* re, float* im, std::size_t n, SpectrumWorkspace& workspace) {
+  fft_radix2_impl(re, im, n, workspace.twiddle_real.data(), workspace.twiddle_imaginary.data());
 }
 
 Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_rate_hz) {
@@ -111,7 +139,7 @@ Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_ra
   }
 
   hann_window(workspace.real.data(), n);
-  fft_radix2(workspace.real.data(), workspace.imaginary.data(), n);
+  fft_radix2(workspace.real.data(), workspace.imaginary.data(), n, workspace);
 
   const std::size_t half = n / 2;
   double total = 0.0;

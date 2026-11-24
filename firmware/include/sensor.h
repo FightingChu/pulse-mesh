@@ -3,6 +3,7 @@
 #include <cstddef>
 
 constexpr std::size_t kMaxSpectrumSamples = 1024;
+constexpr std::size_t kFftTwiddleChunk = 32;
 
 struct Reading { double vibration_rms; double temp_c; double current_a; };
 
@@ -17,6 +18,8 @@ struct Spectrum {
 struct SpectrumWorkspace {
   std::array<float, kMaxSpectrumSamples> real{};
   std::array<float, kMaxSpectrumSamples> imaginary{};
+  std::array<float, kFftTwiddleChunk> twiddle_real{};
+  std::array<float, kFftTwiddleChunk> twiddle_imaginary{};
 };
 
 double compute_rms(const double* v, std::size_t n);
@@ -25,6 +28,7 @@ Reading sample_once(int tick);
 
 void hann_window(float* x, std::size_t n);
 void fft_radix2(float* re, float* im, std::size_t n);
+void fft_radix2(float* re, float* im, std::size_t n, SpectrumWorkspace& workspace);
 Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_rate_hz);
 Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_rate_hz,
                           SpectrumWorkspace& workspace);
