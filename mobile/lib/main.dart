@@ -86,6 +86,7 @@ class SamplesView extends StatefulWidget {
 class _SamplesViewState extends State<SamplesView> {
   final ApiClient api = ApiClient();
   List<Sample> samples = [];
+  String? selectedDevice;
   String status = '连接中';
   bool loading = false;
 
@@ -123,6 +124,10 @@ class _SamplesViewState extends State<SamplesView> {
 
   @override
   Widget build(BuildContext context) {
+    final devices = samples.map((sample) => sample.deviceId).toSet().toList()..sort();
+    final visibleSamples = selectedDevice == null
+        ? samples
+        : samples.where((sample) => sample.deviceId == selectedDevice).toList();
     return Scaffold(
       floatingActionButton: FloatingActionButton(
         onPressed: loading ? null : load,
@@ -138,22 +143,38 @@ class _SamplesViewState extends State<SamplesView> {
         children: [
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Row(
+            child: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 12,
               children: [
                 Icon(
                   status == 'ok' ? Icons.cloud_done : Icons.cloud_off,
                   color: status == 'ok' ? Colors.green : Colors.red,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
-                Text('云端 $status  ·  ${samples.length} 条'),
+                Text('云端 $status · ${visibleSamples.length} 条'),
+                DropdownButton<String?>(
+                  value: selectedDevice,
+                  hint: const Text('全部设备'),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('全部设备'),
+                    ),
+                    ...devices.map((device) => DropdownMenuItem<String?>(
+                          value: device,
+                          child: Text(device),
+                        )),
+                  ],
+                  onChanged: (device) => setState(() => selectedDevice = device),
+                ),
               ],
             ),
           ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: load,
-              child: samples.isEmpty
+              child: visibleSamples.isEmpty
                   ? ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
                       children: [
@@ -165,9 +186,9 @@ class _SamplesViewState extends State<SamplesView> {
                     )
                   : ListView.builder(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      itemCount: samples.length,
+                      itemCount: visibleSamples.length,
                       itemBuilder: (context, index) {
-                        final s = samples[index];
+                        final s = visibleSamples[index];
                         return ListTile(
                           leading: Icon(levelIcon(s.level), color: levelColor(s.level)),
                           title: Text('${s.deviceId} · ${s.metric}'),
@@ -268,7 +289,8 @@ class _AlertsViewState extends State<AlertsView> {
 
   @override
   Widget build(BuildContext context) {
-    final open = alerts.where((item) => !item.acked).length;
+    final openAlerts = alerts.where((item) => !item.acked).toList();
+    final acknowledgedAlerts = alerts.where((item) => item.acked).toList();
     return Scaffold(
       floatingActionButton: FloatingActionButton(
         onPressed: loading ? null : load,
@@ -292,7 +314,7 @@ class _AlertsViewState extends State<AlertsView> {
                   size: 18,
                 ),
                 const SizedBox(width: 8),
-                Text('未确认告警 $open 条'),
+                Text('未确认 ${openAlerts.length} 条 · 已确认 ${acknowledgedAlerts.length} 条'),
               ],
             ),
           ),
@@ -309,35 +331,55 @@ class _AlertsViewState extends State<AlertsView> {
                         ),
                       ],
                     )
-                  : ListView.separated(
+                  : ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      itemCount: alerts.length,
-                      separatorBuilder: (context, index) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final a = alerts[index];
-                        return ListTile(
-                          leading: Icon(levelIcon(a.level), color: levelColor(a.level)),
-                          title: Text(a.message),
-                          subtitle: Text('${a.deviceId} · ${a.metric}'),
-                          trailing: a.acked
-                              ? const Chip(label: Text('已确认'))
-                              : acknowledging.contains(a.id)
-                                  ? const SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : IconButton(
-                                      icon: const Icon(Icons.done_all),
-                                      tooltip: '确认',
-                                      onPressed: () => ack(a),
-                                    ),
-                        );
-                      },
+                      children: [
+                        if (openAlerts.isNotEmpty) ...[
+                          _alertSectionTitle('待处理', openAlerts.length),
+                          ...openAlerts.map(_buildAlertTile),
+                        ],
+                        if (acknowledgedAlerts.isNotEmpty) ...[
+                          _alertSectionTitle('已确认', acknowledgedAlerts.length),
+                          ...acknowledgedAlerts.map(_buildAlertTile),
+                        ],
+                      ],
                     ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _alertSectionTitle(String title, int count) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text('$title ($count)', style: Theme.of(context).textTheme.titleSmall),
+    );
+  }
+
+  Widget _buildAlertTile(AlertItem alert) {
+    return Column(
+      children: [
+        ListTile(
+          leading: Icon(levelIcon(alert.level), color: levelColor(alert.level)),
+          title: Text(alert.message),
+          subtitle: Text('${alert.deviceId} · ${alert.metric}'),
+          trailing: alert.acked
+              ? const Chip(label: Text('已确认'))
+              : acknowledging.contains(alert.id)
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.done_all),
+                      tooltip: '确认',
+                      onPressed: () => ack(alert),
+                    ),
+        ),
+        const Divider(height: 1),
+      ],
     );
   }
 }
