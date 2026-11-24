@@ -174,6 +174,10 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             if not header.endswith(b'\r\n\r\n'):
                 return
 
+            if self._request_expects_continue(header):
+                self._send_busy_response(request)
+                return
+
             content_length = self._request_content_length(header)
             if content_length is None or content_length > MAX_BODY_BYTES:
                 return
@@ -185,20 +189,34 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
                     return
                 remaining -= len(chunk)
 
-            body = b'{"error":"AI service busy"}'
-            request.sendall(
-                b'HTTP/1.1 503 Service Unavailable\r\n'
-                b'Content-Type: application/json\r\n'
-                b'Retry-After: 1\r\n'
-                b'Connection: close\r\n'
-                + ('Content-Length: %d\r\n\r\n' % len(body)).encode()
-                + body
-            )
+            self._send_busy_response(request)
         except OSError:
             pass
         finally:
             self.shutdown_request(request)
             self._rejection_slots.release()
+
+    @staticmethod
+    def _request_expects_continue(header):
+        for line in bytes(header).split(b'\r\n')[1:]:
+            if not line:
+                break
+            name, separator, value = line.partition(b':')
+            if separator and name.strip().lower() == b'expect':
+                return value.strip().lower() == b'100-continue'
+        return False
+
+    @staticmethod
+    def _send_busy_response(request):
+        body = b'{"error":"AI service busy"}'
+        request.sendall(
+            b'HTTP/1.1 503 Service Unavailable\r\n'
+            b'Content-Type: application/json\r\n'
+            b'Retry-After: 1\r\n'
+            b'Connection: close\r\n'
+            + ('Content-Length: %d\r\n\r\n' % len(body)).encode()
+            + body
+        )
 
     @staticmethod
     def _request_content_length(header):

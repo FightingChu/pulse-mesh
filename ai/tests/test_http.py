@@ -154,6 +154,48 @@ class HTTPTest(unittest.TestCase):
             thread.join(timeout=5)
         self.assertEqual(slow_result, [200])
 
+    def test_overloaded_expect_continue_gets_final_response(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class SlowHandler(main.H):
+            def do_GET(self):
+                entered.set()
+                release.wait(timeout=3)
+                self._send({'status': 'ok'})
+
+        server = main.BoundedThreadingHTTPServer(
+            ('127.0.0.1', 0), SlowHandler, max_workers=1, request_timeout=2
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        address = server.server_address
+        slow_thread = threading.Thread(
+            target=lambda: urllib.request.urlopen(
+                'http://127.0.0.1:%d/slow' % address[1], timeout=4
+            ).close()
+        )
+        slow_thread.start()
+        try:
+            self.assertTrue(entered.wait(timeout=2))
+            with socket.create_connection(address, timeout=2) as client:
+                client.sendall(
+                    b'POST /spectrum HTTP/1.1\r\n'
+                    b'Host: 127.0.0.1\r\n'
+                    b'Content-Length: 1048576\r\n'
+                    b'Expect: 100-continue\r\n'
+                    b'Connection: close\r\n\r\n'
+                )
+                response = client.recv(1024)
+            self.assertIn(b'503 Service Unavailable', response)
+            self.assertNotIn(b'100 Continue', response)
+        finally:
+            release.set()
+            slow_thread.join(timeout=5)
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
     def test_health(self):
         with urllib.request.urlopen(self.base + "/health", timeout=5) as resp:
             self.assertEqual(resp.status, 200)
