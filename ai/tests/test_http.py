@@ -356,6 +356,26 @@ class HTTPTest(unittest.TestCase):
             response = client.recv(1024)
         self.assertIn(b"413", response)
 
+    def test_post_rejects_invalid_content_length_headers(self):
+        cases = [
+            (b"", b"411"),
+            (b"Content-Length: invalid\r\n", b"400"),
+            (b"Content-Length: 2\r\nContent-Length: 2\r\n", b"411"),
+            (b"Transfer-Encoding: chunked\r\n", b"400"),
+        ]
+        for headers, expected_status in cases:
+            with self.subTest(headers=headers):
+                with socket.create_connection(self.server.server_address, timeout=5) as client:
+                    request = (
+                        b"POST /assess HTTP/1.1\r\n"
+                        b"Host: 127.0.0.1\r\n"
+                        + headers
+                        + b"Connection: close\r\n\r\n"
+                    )
+                    client.sendall(request)
+                    response = client.recv(1024)
+                self.assertIn(expected_status, response)
+
 
 if __name__ == "__main__":
     unittest.main()

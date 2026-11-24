@@ -62,6 +62,8 @@ def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0, event_i
     return result
 
 class H(BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+
     def do_GET(self):
         if urlparse(self.path).path in ('/health', '/health/live'):
             self._send({'status': 'ok'})
@@ -69,7 +71,21 @@ class H(BaseHTTPRequestHandler):
             self._send({'error': 'not found'}, 404)
     def do_POST(self):
         try:
-            n = int(self.headers.get('Content-Length', 0))
+            if self.headers.get_all('Transfer-Encoding'):
+                self.close_connection = True
+                self._send({'error': 'transfer encoding is not supported'}, 400)
+                return
+            content_lengths = self.headers.get_all('Content-Length') or []
+            if len(content_lengths) != 1:
+                self.close_connection = True
+                self._send({'error': 'exactly one content-length header is required'}, 411)
+                return
+            try:
+                n = int(content_lengths[0])
+            except ValueError:
+                self.close_connection = True
+                self._send({'error': 'invalid content-length'}, 400)
+                return
             if n < 0 or n > MAX_BODY_BYTES:
                 self.close_connection = True
                 self._send({'error': 'request body too large'}, 413)
