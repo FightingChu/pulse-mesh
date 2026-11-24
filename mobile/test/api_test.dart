@@ -40,6 +40,47 @@ void main() {
     expect(await client.alerts(includeAcked: true), isEmpty);
   });
 
+  test('diagnoses requests bounded history and decodes spectral result', () async {
+    final client = ApiClient(MockClient((request) async {
+      expect(request.url.path, '/api/v1/diagnoses');
+      expect(request.url.queryParameters['limit'], '50');
+      return http.Response(
+        jsonEncode([
+          {
+            'event_id': 'boot-1-spectrum-0',
+            'device_id': 'motor-01',
+            'dominant_hz': 120.12,
+            'peak_amplitude': 0.6,
+            'low_band': 0.0,
+            'mid_band': 0.1,
+            'high_band': 0.9,
+            'fault': 'bearing_wear',
+            'diagnosed_at': '2026-11-12T00:00:00Z',
+          }
+        ]),
+        200,
+      );
+    }));
+    addTearDown(client.close);
+
+    final results = await client.diagnoses();
+    expect(results, hasLength(1));
+    expect(results.single.fault, 'bearing_wear');
+    expect(results.single.dominantHz, 120.12);
+  });
+
+  test('diagnoses rejects an out-of-range limit before request', () async {
+    var called = false;
+    final client = ApiClient(MockClient((request) async {
+      called = true;
+      return http.Response('[]', 200);
+    }));
+    addTearDown(client.close);
+
+    await expectLater(client.diagnoses(limit: 101), throwsRangeError);
+    expect(called, isFalse);
+  });
+
   test('ack throws API error on non-success response', () async {
     final client = ApiClient(MockClient((request) async {
       expect(request.method, 'POST');

@@ -73,6 +73,44 @@ class AlertItem {
   }
 }
 
+class Diagnosis {
+  final String eventId;
+  final String deviceId;
+  final double dominantHz;
+  final double peakAmplitude;
+  final double lowBand;
+  final double midBand;
+  final double highBand;
+  final String fault;
+  final String diagnosedAt;
+
+  Diagnosis({
+    required this.eventId,
+    required this.deviceId,
+    required this.dominantHz,
+    required this.peakAmplitude,
+    required this.lowBand,
+    required this.midBand,
+    required this.highBand,
+    required this.fault,
+    required this.diagnosedAt,
+  });
+
+  factory Diagnosis.fromJson(Map<String, dynamic> json) {
+    return Diagnosis(
+      eventId: json['event_id'] as String? ?? '',
+      deviceId: json['device_id'] as String? ?? 'unknown',
+      dominantHz: (json['dominant_hz'] as num?)?.toDouble() ?? 0,
+      peakAmplitude: (json['peak_amplitude'] as num?)?.toDouble() ?? 0,
+      lowBand: (json['low_band'] as num?)?.toDouble() ?? 0,
+      midBand: (json['mid_band'] as num?)?.toDouble() ?? 0,
+      highBand: (json['high_band'] as num?)?.toDouble() ?? 0,
+      fault: json['fault'] as String? ?? 'unknown',
+      diagnosedAt: json['diagnosed_at'] as String? ?? '',
+    );
+  }
+}
+
 class ApiClient {
   final http.Client _client;
 
@@ -116,6 +154,21 @@ class ApiClient {
     final data = _decodeSuccess(resp) as List<dynamic>;
     return data
         .map((item) => AlertItem.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<Diagnosis>> diagnoses({String device = '', int limit = 50}) async {
+    if (limit < 1 || limit > 100) {
+      throw RangeError.range(limit, 1, 100, 'limit');
+    }
+    final query = <String, String>{'limit': '$limit'};
+    if (device.isNotEmpty) query['device'] = device;
+    final response = await _client
+        .get(Uri.parse('$apiBase/api/v1/diagnoses').replace(queryParameters: query))
+        .timeout(const Duration(seconds: 5));
+    final data = _decodeSuccess(response) as List<dynamic>;
+    return data
+        .map((item) => Diagnosis.fromJson(item as Map<String, dynamic>))
         .toList();
   }
 
