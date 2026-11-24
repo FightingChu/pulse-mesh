@@ -5,6 +5,8 @@
 #include <cstring>
 #include <vector>
 
+static_assert(sizeof(SpectrumWorkspace) == kMaxSpectrumSamples * 2 * sizeof(float));
+
 namespace {
 int failures = 0;
 
@@ -41,6 +43,11 @@ int main() {
   expect_near("dominant amp", s.peak_amplitude, 1.0, 0.1);
   expect_str("imbalance", classify_fault(s, 25.0), "imbalance");
 
+  SpectrumWorkspace workspace{};
+  Spectrum reused = analyze_spectrum(sine.data(), sine.size(), 1000.0, workspace);
+  expect_near("workspace reuse dominant", reused.dominant_hz, 25.0, 2.0);
+  expect_near("workspace reuse amplitude", reused.peak_amplitude, 1.0, 0.1);
+
   std::vector<double> doubled(1024);
   for (std::size_t i = 0; i < doubled.size(); i++) {
     doubled[i] = std::sin(2.0 * 3.14159265358979323846 * 50.0 * (double)i / 1000.0);
@@ -59,6 +66,14 @@ int main() {
 
   Spectrum empty{};
   expect_str("flat spectrum normal", classify_fault(empty, 25.0), "normal");
+
+  std::vector<double> too_large(kMaxSpectrumSamples * 2, 1.0);
+  Spectrum rejected = analyze_spectrum(too_large.data(), too_large.size(), 1000.0, workspace);
+  expect_near("oversized spectrum rejected", rejected.peak_amplitude, 0.0, 1e-9);
+
+  double invalid[] = {0.0, 1.0, NAN, 2.0};
+  Spectrum invalid_result = analyze_spectrum(invalid, 4, 1000.0, workspace);
+  expect_near("non-finite spectrum rejected", invalid_result.peak_amplitude, 0.0, 1e-9);
 
   if (failures != 0) {
     std::printf("%d checks failed\n", failures);

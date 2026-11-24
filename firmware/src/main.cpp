@@ -23,8 +23,9 @@ int main() {
   constexpr double kSampleRate = 1000.0;
   constexpr double kRotation = 25.0;
   double wave[kN];
+  static SpectrumWorkspace workspace;
   synthesize_waveform(wave, kN, kSampleRate, kRotation, 0.6);
-  Spectrum s = analyze_spectrum(wave, kN, kSampleRate);
+  Spectrum s = analyze_spectrum(wave, kN, kSampleRate, workspace);
   std::printf(
       "{\"device_id\":\"motor-01\",\"metric\":\"spectrum\",\"dominant_hz\":%.1f,"
       "\"low_band\":%.3f,\"mid_band\":%.3f,\"high_band\":%.3f,\"fault\":\"%s\"}\n",
