@@ -139,11 +139,12 @@ func (c *Client) doDiagnose(ctx context.Context, req Request) (Result, bool, err
 	}
 	defer resp.Body.Close()
 
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	const maxResponseBytes = 1 << 20
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return Result{}, true, fmt.Errorf("read ai response: %w", err)
 	}
-	if len(payload) == 1<<20 {
+	if len(payload) > maxResponseBytes {
 		return Result{}, true, fmt.Errorf("AI response exceeds 1 MiB limit")
 	}
 	if resp.StatusCode != http.StatusOK {

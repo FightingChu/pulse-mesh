@@ -1,12 +1,14 @@
 package diagnose_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -110,6 +112,30 @@ func TestDiagnoseRejectsOversizedResponse(t *testing.T) {
 	request := diagnose.Request{EventID: "boot-1-spectrum-0", DeviceID: "motor-01", Values: []float64{1}}
 	if _, err := client.Diagnose(context.Background(), request); err == nil {
 		t.Fatal("expected oversized response rejection")
+	}
+}
+
+func TestDiagnoseAllowsResponseAtSizeLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := `{"device_id":"motor-01","event_id":"event-1","fault":"normal","padding":"` + strings.Repeat("x", (1<<20)-100) + `"}`
+		payload := []byte(body)
+		if len(payload) > 1<<20 {
+			t.Fatalf("test response length %d exceeds target", len(payload))
+		}
+		payload = append(payload, bytes.Repeat([]byte{' '}, (1<<20)-len(payload))...)
+		if _, err := w.Write(payload); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+	client := diagnose.NewClient(server.URL)
+	request := diagnose.Request{DeviceID: "motor-01", EventID: "event-1", Values: []float64{1}}
+	result, err := client.Diagnose(context.Background(), request)
+	if err != nil {
+		t.Fatalf("exact-limit valid response was rejected: %v", err)
+	}
+	if result.DeviceID != "motor-01" || result.EventID != "event-1" || result.Fault != "normal" {
+		t.Fatalf("unexpected exact-limit result: %+v", result)
 	}
 }
 
