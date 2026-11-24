@@ -11,12 +11,17 @@ static const char* level_name(int level) {
 
 int main() {
   double buf[8];
+  char json_line[256];
   for (int tick = 0; tick < 50; tick++) {
     Reading r = sample_once(tick);
     for (int i = 0; i < 8; i++) buf[i] = r.vibration_rms;
     double rms = compute_rms(buf, 8);
     int level = classify(rms);
-    std::printf("{\"device_id\":\"motor-01\",\"metric\":\"vibration_rms\",\"value\":%.2f,\"level\":\"%s\",\"temp_c\":%.1f}\n", rms, level_name(level), r.temp_c);
+    const std::size_t length = serialize_sample_json(
+        json_line, sizeof(json_line), "sim-motor-01", "motor-01", "vibration_rms", rms,
+        level_name(level), r.temp_c);
+    if (length == 0) return 1;
+    std::puts(json_line);
   }
 
   constexpr std::size_t kN = 1024;
@@ -26,10 +31,10 @@ int main() {
   static SpectrumWorkspace workspace;
   synthesize_waveform(wave, kN, kSampleRate, kRotation, 0.6);
   Spectrum s = analyze_spectrum(wave, kN, kSampleRate, workspace);
-  std::printf(
-      "{\"device_id\":\"motor-01\",\"metric\":\"spectrum\",\"dominant_hz\":%.1f,"
-      "\"low_band\":%.3f,\"mid_band\":%.3f,\"high_band\":%.3f,\"fault\":\"%s\"}\n",
-      s.dominant_hz, s.low_band, s.mid_band, s.high_band,
+  const std::size_t spectrum_length = serialize_spectrum_json(
+      json_line, sizeof(json_line), "sim-motor-01-spectrum", "motor-01", s,
       classify_fault(s, kRotation));
+  if (spectrum_length == 0) return 1;
+  std::puts(json_line);
   return 0;
 }

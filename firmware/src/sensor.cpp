@@ -1,11 +1,76 @@
 #include "sensor.h"
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr std::size_t kHannReanchorInterval = 32;
 bool is_power_of_two(std::size_t n) { return n >= 2 && (n & (n - 1)) == 0; }
+
+class JsonWriter {
+ public:
+  JsonWriter(char* output, std::size_t capacity) : output_(output), capacity_(capacity) {
+    if (capacity_ > 0 && output_ != nullptr) output_[0] = '\0';
+  }
+
+  bool append(const char* text) {
+    if (text == nullptr) return false;
+    while (*text != '\0') {
+      if (!appendChar(*text++)) return false;
+    }
+    return true;
+  }
+
+  bool appendDouble(double value, int precision) {
+    if (!std::isfinite(value)) return false;
+    char number[48];
+    const int length = std::snprintf(number, sizeof(number), "%.*f", precision, value);
+    if (length < 0 || (std::size_t)length >= sizeof(number)) return false;
+    return append(number);
+  }
+
+  bool appendString(const char* value) {
+    if (value == nullptr || !appendChar('"')) return false;
+    for (const unsigned char* cursor = (const unsigned char*)value; *cursor != 0; cursor++) {
+      const char* escaped = nullptr;
+      switch (*cursor) {
+        case '"': escaped = "\\\""; break;
+        case '\\': escaped = "\\\\"; break;
+        case '\b': escaped = "\\b"; break;
+        case '\f': escaped = "\\f"; break;
+        case '\n': escaped = "\\n"; break;
+        case '\r': escaped = "\\r"; break;
+        case '\t': escaped = "\\t"; break;
+        default: break;
+      }
+      if (escaped != nullptr) {
+        if (!append(escaped)) return false;
+      } else if (*cursor < 0x20) {
+        char control[7];
+        const int length = std::snprintf(control, sizeof(control), "\\u%04x", *cursor);
+        if (length != 6 || !append(control)) return false;
+      } else if (!appendChar((char)*cursor)) {
+        return false;
+      }
+    }
+    return appendChar('"');
+  }
+
+  std::size_t size() const { return length_; }
+
+ private:
+  bool appendChar(char value) {
+    if (output_ == nullptr || length_ + 1 >= capacity_) return false;
+    output_[length_++] = value;
+    output_[length_] = '\0';
+    return true;
+  }
+
+  char* output_;
+  std::size_t capacity_;
+  std::size_t length_ = 0;
+};
 
 void fft_radix2_impl(float* re, float* im, std::size_t n, float* twiddle_real,
                      float* twiddle_imaginary) {
@@ -205,4 +270,40 @@ void synthesize_waveform(double* out, std::size_t n, double sample_rate_hz,
         bearing_amplitude * std::sin(2.0 * kPi * 120.0 * t);
     out[i] = fundamental + harmonic + bearing;
   }
+}
+
+std::size_t serialize_sample_json(char* output, std::size_t capacity, const char* event_id,
+                                  const char* device_id, const char* metric, double value,
+                                  const char* level, double temp_c) {
+  JsonWriter writer(output, capacity);
+  if (!writer.append("{\"event_id\":") || !writer.appendString(event_id) ||
+      !writer.append(",\"device_id\":") || !writer.appendString(device_id) ||
+      !writer.append(",\"metric\":") || !writer.appendString(metric) ||
+      !writer.append(",\"value\":") || !writer.appendDouble(value, 2) ||
+      !writer.append(",\"level\":") || !writer.appendString(level) ||
+      !writer.append(",\"temp_c\":") || !writer.appendDouble(temp_c, 1) ||
+      !writer.append("}")) {
+    if (output != nullptr && capacity > 0) output[0] = '\0';
+    return 0;
+  }
+  return writer.size();
+}
+
+std::size_t serialize_spectrum_json(char* output, std::size_t capacity, const char* event_id,
+                                    const char* device_id, const Spectrum& spectrum,
+                                    const char* fault) {
+  JsonWriter writer(output, capacity);
+  if (!writer.append("{\"event_id\":") || !writer.appendString(event_id) ||
+      !writer.append(",\"device_id\":") || !writer.appendString(device_id) ||
+      !writer.append(",\"metric\":\"spectrum\",\"dominant_hz\":") ||
+      !writer.appendDouble(spectrum.dominant_hz, 1) ||
+      !writer.append(",\"peak_amplitude\":") || !writer.appendDouble(spectrum.peak_amplitude, 3) ||
+      !writer.append(",\"low_band\":") || !writer.appendDouble(spectrum.low_band, 3) ||
+      !writer.append(",\"mid_band\":") || !writer.appendDouble(spectrum.mid_band, 3) ||
+      !writer.append(",\"high_band\":") || !writer.appendDouble(spectrum.high_band, 3) ||
+      !writer.append(",\"fault\":") || !writer.appendString(fault) || !writer.append("}")) {
+    if (output != nullptr && capacity > 0) output[0] = '\0';
+    return 0;
+  }
+  return writer.size();
 }

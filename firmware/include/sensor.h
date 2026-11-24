@@ -35,3 +35,9 @@ Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_ra
 const char* classify_fault(const Spectrum& s, double rotation_hz);
 void synthesize_waveform(double* out, std::size_t n, double sample_rate_hz,
                          double rotation_hz, double bearing_amplitude);
+std::size_t serialize_sample_json(char* output, std::size_t capacity, const char* event_id,
+                                  const char* device_id, const char* metric, double value,
+                                  const char* level, double temp_c);
+std::size_t serialize_spectrum_json(char* output, std::size_t capacity, const char* event_id,
+                                    const char* device_id, const Spectrum& spectrum,
+                                    const char* fault);

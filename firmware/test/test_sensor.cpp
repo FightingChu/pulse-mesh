@@ -33,6 +33,30 @@ void expect_str(const char* name, const char* got, const char* want) {
 }  // namespace
 
 int main() {
+  char json_line[256];
+  const std::size_t sample_json_size = serialize_sample_json(
+      json_line, sizeof(json_line), "event\"42", "motor\\01", "vibration_rms", 4.8,
+      "critical", 56.5);
+  expect_near("sample JSON length", (double)sample_json_size, (double)std::strlen(json_line), 0.0);
+  expect_str("sample JSON escaping", json_line,
+             "{\"event_id\":\"event\\\"42\",\"device_id\":\"motor\\\\01\",\"metric\":\"vibration_rms\",\"value\":4.80,\"level\":\"critical\",\"temp_c\":56.5}");
+  char tiny_json[8];
+  expect_near("sample JSON small buffer",
+              (double)serialize_sample_json(tiny_json, sizeof(tiny_json), "event", "motor-01",
+                                            "vibration_rms", 1.0, "normal", 55.0),
+              0.0, 0.0);
+  expect_near("sample JSON non-finite value",
+              (double)serialize_sample_json(json_line, sizeof(json_line), "event", "motor-01",
+                                            "vibration_rms", NAN, "normal", 55.0),
+              0.0, 0.0);
+  const Spectrum serialized_spectrum{120.1, 0.6, 0.0, 0.1, 0.9};
+  const std::size_t spectrum_json_size = serialize_spectrum_json(
+      json_line, sizeof(json_line), "event-spectrum", "motor-01", serialized_spectrum,
+      "bearing_wear");
+  expect_near("spectrum JSON length", (double)spectrum_json_size, (double)std::strlen(json_line), 0.0);
+  expect_str("spectrum JSON fields", json_line,
+             "{\"event_id\":\"event-spectrum\",\"device_id\":\"motor-01\",\"metric\":\"spectrum\",\"dominant_hz\":120.1,\"peak_amplitude\":0.600,\"low_band\":0.000,\"mid_band\":0.100,\"high_band\":0.900,\"fault\":\"bearing_wear\"}");
+
   const double reference_input[] = {1.0, 0.0, -1.0, 0.0, 2.0, 0.0, -2.0, 0.0};
   float fft_real[8];
   for (std::size_t i = 0; i < 8; i++) fft_real[i] = (float)reference_input[i];
