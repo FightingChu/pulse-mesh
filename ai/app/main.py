@@ -112,10 +112,20 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     request_queue_size = 16
     daemon_threads = True
 
-    def __init__(self, server_address, handler_class, max_workers=DEFAULT_MAX_WORKERS, request_timeout=REQUEST_TIMEOUT_SECONDS):
+    def __init__(
+        self,
+        server_address,
+        handler_class,
+        max_workers=DEFAULT_MAX_WORKERS,
+        request_timeout=REQUEST_TIMEOUT_SECONDS,
+        max_rejection_workers=16,
+    ):
         if max_workers < 1 or max_workers > MAX_WORKERS_LIMIT:
             raise ValueError('max_workers must be between 1 and 64')
+        if max_rejection_workers < 1 or max_rejection_workers > self.request_queue_size:
+            raise ValueError('max_rejection_workers must be between 1 and 16')
         self._worker_slots = threading.BoundedSemaphore(max_workers)
+        self._rejection_slots = threading.BoundedSemaphore(max_rejection_workers)
         self._request_timeout = request_timeout
         super().__init__(server_address, handler_class)
 
@@ -126,18 +136,20 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         if not self._worker_slots.acquire(blocking=False):
-            try:
-                body = b'{"error":"AI service busy"}'
-                request.sendall(
-                    b'HTTP/1.1 503 Service Unavailable\r\n'
-                    b'Content-Type: application/json\r\n'
-                    b'Retry-After: 1\r\n'
-                    b'Connection: close\r\n'
-                    + ('Content-Length: %d\r\n\r\n' % len(body)).encode()
-                    + body
-                )
-            finally:
+            if not self._rejection_slots.acquire(blocking=False):
                 self.shutdown_request(request)
+                return
+            try:
+                thread = threading.Thread(
+                    target=self._reject_overloaded_request,
+                    args=(request,),
+                    daemon=True,
+                )
+                thread.start()
+            except Exception:
+                self._rejection_slots.release()
+                self.shutdown_request(request)
+                raise
             return
         try:
             super().process_request(request, client_address)
@@ -150,6 +162,58 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             super().process_request_thread(request, client_address)
         finally:
             self._worker_slots.release()
+
+    def _reject_overloaded_request(self, request):
+        try:
+            header = bytearray()
+            while len(header) < 16 * 1024 and not header.endswith(b'\r\n\r\n'):
+                chunk = request.recv(min(1024, 16 * 1024 - len(header)))
+                if not chunk:
+                    return
+                header.extend(chunk)
+            if not header.endswith(b'\r\n\r\n'):
+                return
+
+            content_length = self._request_content_length(header)
+            if content_length is None or content_length > MAX_BODY_BYTES:
+                return
+            body_start = header.find(b'\r\n\r\n') + 4
+            remaining = max(0, content_length - (len(header) - body_start))
+            while remaining > 0:
+                chunk = request.recv(min(4096, remaining))
+                if not chunk:
+                    return
+                remaining -= len(chunk)
+
+            body = b'{"error":"AI service busy"}'
+            request.sendall(
+                b'HTTP/1.1 503 Service Unavailable\r\n'
+                b'Content-Type: application/json\r\n'
+                b'Retry-After: 1\r\n'
+                b'Connection: close\r\n'
+                + ('Content-Length: %d\r\n\r\n' % len(body)).encode()
+                + body
+            )
+        except OSError:
+            pass
+        finally:
+            self.shutdown_request(request)
+            self._rejection_slots.release()
+
+    @staticmethod
+    def _request_content_length(header):
+        lines = bytes(header).split(b'\r\n')[1:]
+        for line in lines:
+            if not line:
+                break
+            name, separator, value = line.partition(b':')
+            if separator and name.strip().lower() == b'content-length':
+                try:
+                    length = int(value.strip())
+                except ValueError:
+                    return None
+                return length if length >= 0 else None
+        return 0
 
 if __name__ == '__main__':
     try:

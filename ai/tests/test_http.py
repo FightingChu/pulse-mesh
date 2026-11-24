@@ -95,6 +95,65 @@ class HTTPTest(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_slow_overload_headers_do_not_block_accept_loop(self):
+        request_entered = threading.Event()
+        rejection_entered = threading.Event()
+        release_worker = threading.Event()
+
+        class SlowHandler(main.H):
+            def do_GET(self):
+                if self.path == '/slow':
+                    request_entered.set()
+                    release_worker.wait(timeout=3)
+                    self._send({'status': 'ok'})
+                    return
+                super().do_GET()
+
+        class ObservableServer(main.BoundedThreadingHTTPServer):
+            def _reject_overloaded_request(self, request):
+                rejection_entered.set()
+                super()._reject_overloaded_request(request)
+
+        server = ObservableServer(
+            ('127.0.0.1', 0),
+            SlowHandler,
+            max_workers=1,
+            request_timeout=2,
+            max_rejection_workers=2,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = 'http://127.0.0.1:%d' % server.server_port
+        slow_result = []
+
+        def request_slow():
+            try:
+                with urllib.request.urlopen(base + '/slow', timeout=4) as response:
+                    slow_result.append(response.status)
+            except Exception as exc:
+                slow_result.append(exc)
+
+        slow_thread = threading.Thread(target=request_slow)
+        slow_thread.start()
+        stalled_client = None
+        try:
+            self.assertTrue(request_entered.wait(timeout=2))
+            stalled_client = socket.create_connection(server.server_address, timeout=2)
+            stalled_client.sendall(b'GET /blocked HTTP/1.1\r\nHost: 127.0.0.1\r\n')
+            self.assertTrue(rejection_entered.wait(timeout=2))
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(base + '/health', timeout=1)
+            self.assertEqual(ctx.exception.code, 503)
+        finally:
+            if stalled_client is not None:
+                stalled_client.close()
+            release_worker.set()
+            slow_thread.join(timeout=5)
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+        self.assertEqual(slow_result, [200])
+
     def test_health(self):
         with urllib.request.urlopen(self.base + "/health", timeout=5) as resp:
             self.assertEqual(resp.status, 200)
