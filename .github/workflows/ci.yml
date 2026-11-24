@@ -21,6 +21,13 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go test -race ./...
+      - name: Fuzz sample and JSON boundaries
+        env:
+          FUZZTIME: 10s
+        run: |
+          go test ./internal/httpapi -run '^$' -fuzz '^FuzzValidateSample$' -fuzztime="$FUZZTIME"
+          go test ./internal/httpapi -run '^$' -fuzz '^FuzzDecodeJSON$' -fuzztime="$FUZZTIME"
+          go test ./internal/httpapi -run '^$' -fuzz '^FuzzSampleJSONRoundTrip$' -fuzztime="$FUZZTIME"
 
   ai:
     runs-on: ubuntu-latest
