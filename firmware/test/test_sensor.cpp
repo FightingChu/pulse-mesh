@@ -31,6 +31,15 @@ void expect_str(const char* name, const char* got, const char* want) {
 }  // namespace
 
 int main() {
+  float window[9];
+  for (float& sample : window) sample = 1.0f;
+  hann_window(window, 9);
+  expect_near("hann left endpoint", window[0], 0.0, 1e-7);
+  expect_near("hann right endpoint", window[8], 0.0, 1e-7);
+  for (std::size_t i = 1; i < 8; i++) {
+    expect_near("hann symmetry", window[i], window[8 - i], 1e-6);
+  }
+
   const double constant[] = {3.0, 3.0, 3.0, 3.0};
   expect_near("rms constant", compute_rms(constant, 4), 3.0, 1e-9);
   expect_near("rms empty", compute_rms(nullptr, 0), 0.0, 1e-9);

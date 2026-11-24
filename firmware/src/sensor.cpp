@@ -4,6 +4,7 @@
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
+constexpr std::size_t kHannReanchorInterval = 32;
 bool is_power_of_two(std::size_t n) { return n >= 2 && (n & (n - 1)) == 0; }
 }  // namespace
 
@@ -26,8 +27,23 @@ Reading sample_once(int tick) {
 
 void hann_window(float* x, std::size_t n) {
   if (n < 2) return;
+  const double phase_step = 2.0 * kPi / (double)(n - 1);
+  const double step_cos = std::cos(phase_step);
+  const double step_sin = std::sin(phase_step);
+  double phase_cos = 1.0;
+  double phase_sin = 0.0;
   for (std::size_t i = 0; i < n; i++) {
-    x[i] = (float)(x[i] * 0.5 * (1.0 - std::cos(2.0 * kPi * (double)i / (double)(n - 1))));
+    if (i % kHannReanchorInterval == 0) {
+      const double phase = phase_step * (double)i;
+      phase_cos = std::cos(phase);
+      phase_sin = std::sin(phase);
+    }
+    const double window = (i == 0 || i + 1 == n) ? 0.0 : 0.5 * (1.0 - phase_cos);
+    x[i] = (float)(x[i] * window);
+
+    const double next_cos = phase_cos * step_cos - phase_sin * step_sin;
+    phase_sin = phase_sin * step_cos + phase_cos * step_sin;
+    phase_cos = next_cos;
   }
 }
 
