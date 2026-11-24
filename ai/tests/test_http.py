@@ -196,6 +196,70 @@ class HTTPTest(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_server_close_waits_for_rejection_workers(self):
+        slow_entered = threading.Event()
+        rejection_entered = threading.Event()
+        release_rejection = threading.Event()
+
+        class SlowHandler(main.H):
+            def do_GET(self):
+                slow_entered.set()
+                threading.Event().wait(timeout=2)
+                self._send({'status': 'ok'})
+
+        class ObservableServer(main.BoundedThreadingHTTPServer):
+            def _reject_overloaded_request(self, request):
+                rejection_entered.set()
+                release_rejection.wait(timeout=3)
+                super()._reject_overloaded_request(request)
+
+        server = ObservableServer(
+            ('127.0.0.1', 0),
+            SlowHandler,
+            max_workers=1,
+            max_rejection_workers=1,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        slow_result = []
+
+        def request_slow():
+            try:
+                with urllib.request.urlopen(
+                    'http://127.0.0.1:%d/slow' % server.server_port, timeout=4
+                ) as response:
+                    slow_result.append(response.status)
+            except Exception as exc:
+                slow_result.append(exc)
+
+        slow_thread = threading.Thread(target=request_slow)
+        slow_thread.start()
+        stalled_client = None
+        close_result = []
+        close_thread = None
+        try:
+            self.assertTrue(slow_entered.wait(timeout=2))
+            stalled_client = socket.create_connection(server.server_address, timeout=2)
+            stalled_client.sendall(b'GET /blocked HTTP/1.1\r\nHost: 127.0.0.1\r\n')
+            self.assertTrue(rejection_entered.wait(timeout=2))
+            server.shutdown()
+            close_thread = threading.Thread(target=lambda: close_result.append(server.server_close()))
+            close_thread.start()
+            time.sleep(0.05)
+            self.assertTrue(close_thread.is_alive(), 'server_close returned before rejection worker exited')
+        finally:
+            release_rejection.set()
+            if stalled_client is not None:
+                stalled_client.close()
+            slow_thread.join(timeout=5)
+            if close_thread is not None:
+                close_thread.join(timeout=5)
+            else:
+                server.shutdown()
+            thread.join(timeout=5)
+        self.assertEqual(slow_result, [200])
+        self.assertEqual(close_result, [None])
+
     def test_health(self):
         with urllib.request.urlopen(self.base + "/health", timeout=5) as resp:
             self.assertEqual(resp.status, 200)

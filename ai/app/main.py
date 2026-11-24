@@ -142,6 +142,8 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             raise ValueError('max_rejection_workers must be between 1 and 16')
         self._worker_slots = threading.BoundedSemaphore(max_workers)
         self._rejection_slots = threading.BoundedSemaphore(max_rejection_workers)
+        self._rejection_threads = set()
+        self._rejection_threads_lock = threading.Lock()
         self._request_timeout = request_timeout
         super().__init__(server_address, handler_class)
 
@@ -161,9 +163,13 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
                     args=(request,),
                     daemon=True,
                 )
+                with self._rejection_threads_lock:
+                    self._rejection_threads.add(thread)
                 thread.start()
             except Exception:
                 self._rejection_slots.release()
+                with self._rejection_threads_lock:
+                    self._rejection_threads.discard(thread)
                 self.shutdown_request(request)
                 raise
             return
@@ -178,6 +184,13 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             super().process_request_thread(request, client_address)
         finally:
             self._worker_slots.release()
+
+    def server_close(self):
+        super().server_close()
+        with self._rejection_threads_lock:
+            threads = tuple(self._rejection_threads)
+        for thread in threads:
+            thread.join(timeout=self._request_timeout + 1)
 
     def _reject_overloaded_request(self, request):
         try:
@@ -211,6 +224,8 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         finally:
             self.shutdown_request(request)
             self._rejection_slots.release()
+            with self._rejection_threads_lock:
+                self._rejection_threads.discard(threading.current_thread())
 
     @staticmethod
     def _request_expects_continue(header):
