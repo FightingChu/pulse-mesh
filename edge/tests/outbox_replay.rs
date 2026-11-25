@@ -163,3 +163,45 @@ fn response_header_limit_controls_cache_acknowledgement() {
         }
     }
 }
+
+#[test]
+fn interim_headers_do_not_decide_cache_acknowledgement() {
+    for (final_response, expected) in [
+        (
+            b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n".as_slice(),
+            1,
+        ),
+        (
+            b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n".as_slice(),
+            0,
+        ),
+        (b"".as_slice(), 0),
+    ] {
+        let cache = TestCache::new();
+        let body = r#"{"event_id":"interim-response"}"#;
+        append_cache(cache.path(), body).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(read_request(&mut stream), body);
+            let response = [
+                b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\n\r\n".as_slice(),
+                final_response,
+            ]
+            .concat();
+            let _ = stream.write_all(&response);
+        });
+        let acknowledged = flush_cache(&address, cache.path());
+        worker.join().unwrap();
+        assert_eq!(acknowledged, expected);
+        if expected == 1 {
+            assert!(!cache.path().exists());
+        } else {
+            assert_eq!(
+                read_cache(cache.path()).unwrap(),
+                vec![format!("{SAMPLE_PATH}\t{body}")]
+            );
+        }
+    }
+}

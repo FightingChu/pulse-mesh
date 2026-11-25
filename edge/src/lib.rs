@@ -169,39 +169,47 @@ pub fn forward_to(addr: &str, path: &str, body: &str) -> bool {
 fn read_http_success(stream: &mut impl Read) -> bool {
     let mut response = Vec::with_capacity(256);
     let mut chunk = [0u8; 256];
-    while response.len() < 8192 {
+    let mut header_start = 0;
+    loop {
+        while let Some(header_length) = response[header_start..]
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+        {
+            let header_end = header_start + header_length + 4;
+            let header = &response[header_start..header_end];
+            let Some(line_end) = header.windows(2).position(|window| window == b"\r\n") else {
+                return false;
+            };
+            let Ok(status_line) = std::str::from_utf8(&header[..line_end]) else {
+                return false;
+            };
+            let mut parts = status_line.split_whitespace();
+            match (
+                parts.next(),
+                parts
+                    .next()
+                    .filter(|code| {
+                        code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+                    .and_then(|code| code.parse::<u16>().ok()),
+            ) {
+                (Some("HTTP/1.1" | "HTTP/1.0"), Some(100 | 102..=199)) => {
+                    header_start = header_end;
+                }
+                (Some("HTTP/1.1" | "HTTP/1.0"), Some(200..=299)) => return true,
+                _ => return false,
+            }
+        }
+        if response.len() == 8192 {
+            return false;
+        }
         let remaining = (8192 - response.len()).min(chunk.len());
         match stream.read(&mut chunk[..remaining]) {
-            Ok(0) => break,
-            Ok(n) => {
-                response.extend_from_slice(&chunk[..n]);
-                if response.windows(4).any(|window| window == b"\r\n\r\n") {
-                    break;
-                }
-            }
+            Ok(0) => return false,
+            Ok(count) => response.extend_from_slice(&chunk[..count]),
             Err(_) => return false,
         }
     }
-    if !response.windows(4).any(|window| window == b"\r\n\r\n") {
-        return false;
-    }
-    let Some(line_end) = response.windows(2).position(|window| window == b"\r\n") else {
-        return false;
-    };
-    let Ok(status_line) = std::str::from_utf8(&response[..line_end]) else {
-        return false;
-    };
-    let mut parts = status_line.split_whitespace();
-    matches!(
-        (
-            parts.next(),
-            parts
-                .next()
-                .filter(|code| code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_digit()))
-                .and_then(|code| code.parse::<u16>().ok()),
-        ),
-        (Some("HTTP/1.1" | "HTTP/1.0"), Some(200..=299))
-    )
 }
 
 pub fn waveform(
@@ -397,6 +405,53 @@ mod tests {
         let mut response = b"HTTP/1.1 200 OK\r\nContent-Length: 9000\r\n\r\n".to_vec();
         response.extend_from_slice(&[b'x'; 9000]);
         assert!(read_http_success(&mut Cursor::new(response)));
+    }
+
+    #[test]
+    fn informational_responses_require_a_final_success() {
+        let interim =
+            b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\nLink: </health>\r\n\r\n";
+        for (final_response, expected) in [
+            (
+                b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n".as_slice(),
+                true,
+            ),
+            (
+                b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n".as_slice(),
+                false,
+            ),
+            (b"HTTP/1.1 200 OK\r\n".as_slice(), false),
+            (b"HTTP/1.1 +200 OK\r\n\r\n".as_slice(), false),
+            (b"".as_slice(), false),
+        ] {
+            let response = [interim.as_slice(), final_response].concat();
+            for split in 0..=response.len() {
+                let mut stream =
+                    Cursor::new(&response[..split]).chain(Cursor::new(&response[split..]));
+                assert_eq!(
+                    read_http_success(&mut stream),
+                    expected,
+                    "final response {:?}, split {split}",
+                    String::from_utf8_lossy(final_response)
+                );
+            }
+        }
+        assert!(!read_http_success(&mut Cursor::new(
+            b"HTTP/1.1 101 Switching Protocols\r\n\r\nHTTP/1.1 200 OK\r\n\r\n"
+        )));
+    }
+
+    #[test]
+    fn informational_responses_share_the_header_read_budget() {
+        for total_length in [8192usize, 8193] {
+            let mut response = b"HTTP/1.1 103 Early Hints\r\nX-Padding: ".to_vec();
+            let final_response = b"\r\n\r\nHTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
+            response.resize(total_length - final_response.len(), b'x');
+            response.extend_from_slice(final_response);
+            let mut stream = Cursor::new(response);
+            assert_eq!(read_http_success(&mut stream), total_length <= 8192);
+            assert!(stream.position() <= 8192);
+        }
     }
 
     #[test]
