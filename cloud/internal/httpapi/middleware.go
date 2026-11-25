@@ -126,7 +126,7 @@ func withLogging(metrics *Metrics, next http.Handler) http.Handler {
 		if normalizePath(r.URL.Path) != "/metrics" {
 			metrics.observe(r.Method, r.URL.Path, rec.status)
 		}
-		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Microsecond))
+		log.Printf("%q %q %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Microsecond))
 	})
 }
 
@@ -147,7 +147,7 @@ func withRecovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("panic %s %s: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
+				log.Printf("panic %q %q: %q\n%s", r.Method, r.URL.Path, fmt.Sprint(err), debug.Stack())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			}
 		}()
