@@ -106,6 +106,37 @@ class OverloadStreamTest(unittest.TestCase):
                 self.assertEqual(client.chunks, [])
                 self.assertTrue(client.response.startswith(b'HTTP/1.1 503 '))
 
+    def test_overload_rejects_ambiguous_framing_without_reading_body(self):
+        for framing in (
+            b'Content-Length: 2\r\nContent-Length: 2\r\n',
+            b'Content-Length: 0\r\nContent-Length: 0\r\n',
+            b'Content-Length: 100\r\ncontent-length: 2\r\n',
+            b'Content-Length: 2\r\nContent-Length: 100\r\n',
+            b'Content-Length: 2\r\nContent-Length: invalid\r\n',
+            b'Transfer-Encoding: chunked\r\nContent-Length: 100\r\n',
+            b'Content-Length: 100\r\ntransfer-encoding: chunked\r\n',
+            b'Transfer-Encoding: chunked\r\n',
+            b'Content-Length: 2\r\nTransfer-Encoding:\r\n',
+            b'Content-Length: 100\r\nContent-Length: 2\r\nExpect: 100-continue\r\n',
+            b'Transfer-Encoding: chunked\r\nExpect: 100-continue\r\n',
+        ):
+            with self.subTest(framing=framing):
+                header = b'POST /assess HTTP/1.1\r\n' + framing + b'\r\n'
+                client = self.reject([header, b'{}'])
+                self.assertFalse(client.read_past_body)
+                self.assertEqual(client.chunks, [b'{}'])
+                self.assertEqual(client.response, b'')
+
+    def test_overload_preserves_requests_without_bodies(self):
+        for header in (
+            b'GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n',
+            b'POST /assess HTTP/1.1\r\ncOnTeNt-LeNgTh: 0\r\n\r\n',
+        ):
+            with self.subTest(header=header):
+                client = self.reject([header])
+                self.assertFalse(client.read_past_body)
+                self.assertTrue(client.response.startswith(b'HTTP/1.1 503 '))
+
 
 if __name__ == '__main__':
     unittest.main()

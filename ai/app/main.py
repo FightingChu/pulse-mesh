@@ -231,12 +231,14 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 
             body_start = header_end + 4
             request_headers = header[:body_start]
+            content_length = self._request_content_length(request_headers)
+            if content_length is None:
+                return
             if self._request_expects_continue(request_headers):
                 self._send_busy_response(request)
                 return
 
-            content_length = self._request_content_length(request_headers)
-            if content_length is None or content_length > MAX_BODY_BYTES:
+            if content_length > MAX_BODY_BYTES:
                 return
             remaining = max(0, content_length - (len(header) - body_start))
             while remaining > 0:
@@ -279,17 +281,22 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     @staticmethod
     def _request_content_length(header):
         lines = bytes(header).split(b'\r\n')[1:]
+        length = None
         for line in lines:
             if not line:
                 break
             name, separator, value = line.partition(b':')
-            if separator and name.strip().lower() == b'content-length':
+            name = name.strip().lower()
+            if separator and name == b'transfer-encoding':
+                return None
+            if separator and name == b'content-length':
+                if length is not None:
+                    return None
                 try:
                     length = _parse_content_length(value.decode('latin-1'))
                 except ValueError:
                     return None
-                return length
-        return 0
+        return length if length is not None else 0
 
 if __name__ == '__main__':
     try:
