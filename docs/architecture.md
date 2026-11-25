@@ -43,6 +43,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 # 可观测性与运行时
 
 - 每个请求打一行访问日志：方法、路径、状态码、耗时。
+- 日志和请求计数保留实际写出的首个最终状态码，后续重复 `WriteHeader` 不覆盖；100/103 等临时响应不作为最终状态，101 协议切换除外。
 - GET /metrics 输出 Prometheus 文本，计数器按方法、路径、状态码聚合，告警确认路径归一化为 /api/v1/alerts/{id}/ack。
 - 所有响应带 CORS 头，OPTIONS 预检直接返回 204。
 - 服务设置 ReadHeader 5s、Read 15s、Write 15s、Idle 60s 超时，收到 SIGINT/SIGTERM 后 10s 内优雅退出。

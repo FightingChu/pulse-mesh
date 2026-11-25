@@ -17,8 +17,10 @@ type statusRecorder struct {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+	if r.status == 0 && (code >= http.StatusOK || code == http.StatusSwitchingProtocols) {
+		r.status = code
+	}
 }
 
 func (r *statusRecorder) Write(body []byte) (int, error) {
