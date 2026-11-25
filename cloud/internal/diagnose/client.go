@@ -45,6 +45,12 @@ type Client struct {
 	cooldown         time.Duration
 	openUntil        time.Time
 	probeInFlight    bool
+	generation       uint64
+}
+
+type requestPermit struct {
+	generation uint64
+	probe      bool
 }
 
 func NewClient(base string) *Client {
@@ -70,53 +76,62 @@ func NewClientWithBreaker(base string, timeout time.Duration, failureThreshold i
 }
 
 func (c *Client) Diagnose(ctx context.Context, req Request) (Result, error) {
-	probe, err := c.beginRequest()
+	permit, err := c.beginRequest()
 	if err != nil {
 		return Result{}, err
 	}
 	result, countFailure, err := c.doDiagnose(ctx, req)
 	if err == nil {
-		c.finishRequest(probe, true, false)
+		c.finishRequest(permit, true, false)
 	} else if callerErr := ctx.Err(); callerErr != nil && errors.Is(err, callerErr) {
-		c.finishRequest(probe, false, false)
+		c.finishRequest(permit, false, false)
 	} else {
-		c.finishRequest(probe, false, countFailure)
+		c.finishRequest(permit, false, countFailure)
 	}
 	return result, err
 }
 
-func (c *Client) beginRequest() (bool, error) {
+func (c *Client) beginRequest() (requestPermit, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.openUntil.IsZero() {
-		return false, nil
+		return requestPermit{generation: c.generation}, nil
 	}
 	if time.Now().Before(c.openUntil) {
-		return false, ErrCircuitOpen
+		return requestPermit{}, ErrCircuitOpen
 	}
 	if c.probeInFlight {
-		return false, ErrCircuitOpen
+		return requestPermit{}, ErrCircuitOpen
 	}
 	c.probeInFlight = true
-	return true, nil
+	return requestPermit{generation: c.generation, probe: true}, nil
 }
 
-func (c *Client) finishRequest(probe, succeeded, failed bool) {
+func (c *Client) finishRequest(permit requestPermit, succeeded, failed bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if permit.generation != c.generation {
+		return
+	}
 	if succeeded {
+		if permit.probe {
+			c.generation++
+		}
 		c.failureCount = 0
 		c.openUntil = time.Time{}
 		c.probeInFlight = false
 		return
 	}
 	if !failed {
-		c.probeInFlight = false
+		if permit.probe {
+			c.probeInFlight = false
+		}
 		return
 	}
 	c.failureCount++
 	c.probeInFlight = false
-	if probe || c.failureCount >= c.failureThreshold {
+	if permit.probe || c.failureCount >= c.failureThreshold {
+		c.generation++
 		c.openUntil = time.Now().Add(c.cooldown)
 	}
 }
