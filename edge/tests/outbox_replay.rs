@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use pulse_edge::{append_cache, flush_cache, read_cache, SAMPLE_PATH};
+use pulse_edge::{append_cache, flush_cache, read_cache, Sample, SAMPLE_PATH};
 
 struct TestCache(PathBuf);
 
@@ -204,4 +204,36 @@ fn interim_headers_do_not_decide_cache_acknowledgement() {
             );
         }
     }
+}
+
+#[test]
+fn escaped_sample_strings_replay_as_one_unchanged_record() {
+    let cache = TestCache::new();
+    let body = Sample {
+        event_id: "event\"\\\n\t",
+        device_id: "电机",
+        metric: "vibration\r\nvalue",
+        value: 1.25,
+        level: "normal",
+        temp_c: 55.5,
+    }
+    .to_json();
+    append_cache(cache.path(), &body).unwrap();
+    assert_eq!(
+        read_cache(cache.path()).unwrap(),
+        vec![format!("{SAMPLE_PATH}\t{body}")]
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        assert_eq!(read_request(&mut stream), body);
+        stream
+            .write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n")
+            .unwrap();
+    });
+    let acknowledged = flush_cache(&address, cache.path());
+    worker.join().unwrap();
+    assert_eq!(acknowledged, 1);
+    assert!(!cache.path().exists());
 }

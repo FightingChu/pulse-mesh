@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Seek, Write};
 use std::net::TcpStream;
@@ -115,11 +116,36 @@ pub struct OwnedSample {
     pub temp_c: f64,
 }
 
+fn escape_json_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{0008}' => escaped.push_str("\\b"),
+            '\u{000c}' => escaped.push_str("\\f"),
+            '\u{0000}'..='\u{001f}' => {
+                write!(&mut escaped, "\\u{:04x}", character as u32).unwrap();
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 impl Sample<'_> {
     pub fn to_json(&self) -> String {
         format!(
             "{{\"event_id\":\"{}\",\"device_id\":\"{}\",\"metric\":\"{}\",\"value\":{:.2},\"level\":\"{}\",\"temp_c\":{:.1}}}",
-            self.event_id, self.device_id, self.metric, self.value, self.level, self.temp_c
+            escape_json_string(self.event_id),
+            escape_json_string(self.device_id),
+            escape_json_string(self.metric),
+            self.value,
+            escape_json_string(self.level),
+            self.temp_c
         )
     }
 }
@@ -250,8 +276,8 @@ pub fn diagnose_body(
     let encoded: Vec<String> = values.iter().map(|v| format!("{:.4}", v)).collect();
     format!(
         "{{\"event_id\":\"{}\",\"device_id\":\"{}\",\"values\":[{}],\"sample_rate_hz\":{},\"rotation_hz\":{}}}",
-        event_id,
-        device_id,
+        escape_json_string(event_id),
+        escape_json_string(device_id),
         encoded.join(","),
         sample_rate_hz,
         rotation_hz
