@@ -195,22 +195,25 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     def _reject_overloaded_request(self, request):
         try:
             header = bytearray()
-            while len(header) < 16 * 1024 and not header.endswith(b'\r\n\r\n'):
+            header_end = -1
+            while len(header) < 16 * 1024 and header_end < 0:
                 chunk = request.recv(min(1024, 16 * 1024 - len(header)))
                 if not chunk:
                     return
                 header.extend(chunk)
-            if not header.endswith(b'\r\n\r\n'):
+                header_end = header.find(b'\r\n\r\n')
+            if header_end < 0:
                 return
 
-            if self._request_expects_continue(header):
+            body_start = header_end + 4
+            request_headers = header[:body_start]
+            if self._request_expects_continue(request_headers):
                 self._send_busy_response(request)
                 return
 
-            content_length = self._request_content_length(header)
+            content_length = self._request_content_length(request_headers)
             if content_length is None or content_length > MAX_BODY_BYTES:
                 return
-            body_start = header.find(b'\r\n\r\n') + 4
             remaining = max(0, content_length - (len(header) - body_start))
             while remaining > 0:
                 chunk = request.recv(min(4096, remaining))
