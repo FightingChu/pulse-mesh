@@ -169,10 +169,10 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         request_timeout=REQUEST_TIMEOUT_SECONDS,
         max_rejection_workers=16,
     ):
-        if max_workers < 1 or max_workers > MAX_WORKERS_LIMIT:
-            raise ValueError('max_workers must be between 1 and 64')
-        if max_rejection_workers < 1 or max_rejection_workers > self.request_queue_size:
-            raise ValueError('max_rejection_workers must be between 1 and 16')
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int) or not 1 <= max_workers <= MAX_WORKERS_LIMIT:
+            raise ValueError('max_workers must be an integer between 1 and 64')
+        if isinstance(max_rejection_workers, bool) or not isinstance(max_rejection_workers, int) or not 1 <= max_rejection_workers <= self.request_queue_size:
+            raise ValueError('max_rejection_workers must be an integer between 1 and 16')
         self._worker_slots = threading.BoundedSemaphore(max_workers)
         self._rejection_slots = threading.BoundedSemaphore(max_rejection_workers)
         self._rejection_threads = set()
