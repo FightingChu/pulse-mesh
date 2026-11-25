@@ -192,7 +192,7 @@ func (s *Store) Stats() (int, int64, uint64) {
 func (s *Store) List(device string, n int) []Sample {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []Sample
+	out := make([]Sample, 0)
 	for i := len(s.items) - 1; i >= 0 && len(out) < n; i-- {
 		if device == "" || s.items[i].DeviceID == device {
 			out = append(out, s.items[i])

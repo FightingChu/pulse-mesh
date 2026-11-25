@@ -76,6 +76,24 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestEmptySampleQueriesReturnArrays(t *testing.T) {
+	samples := ingest.NewStore()
+	handler := httpapi.New(samples, alerts.New(time.Minute), diagnose.NewClient("http://127.0.0.1:1"), diagnose.NewStore(10))
+	checkEmpty := func(path string) {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK || strings.TrimSpace(recorder.Body.String()) != "[]" {
+			t.Fatalf("empty query %q: status=%d body=%q", path, recorder.Code, recorder.Body.String())
+		}
+	}
+	checkEmpty("/api/v1/samples")
+	if _, err := samples.Add(ingest.Sample{DeviceID: "motor-01", Metric: "v", Value: 1}); err != nil {
+		t.Fatal(err)
+	}
+	checkEmpty("/api/v1/samples?device=missing&limit=1")
+}
+
 func TestHealthReadinessAndLiveness(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()
