@@ -85,6 +85,16 @@ class H(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
     def do_GET(self):
+        try:
+            content_lengths = self.headers.get_all('Content-Length') or []
+            if self.headers.get_all('Transfer-Encoding') or len(content_lengths) > 1:
+                raise ValueError('GET requests must not contain a body')
+            if content_lengths and _parse_content_length(content_lengths[0]) != 0:
+                raise ValueError('GET requests must not contain a body')
+        except ValueError as exc:
+            self.close_connection = True
+            self._send({'error': str(exc)}, 400)
+            return
         if urlparse(self.path).path in ('/health', '/health/live'):
             self._send({'status': 'ok'})
         else:

@@ -270,6 +270,52 @@ class HTTPTest(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(json.load(resp), {"status": "ok"})
 
+    def test_get_body_is_not_executed_as_another_request(self):
+        embedded_request = (
+            b"POST /assess HTTP/1.1\r\nHost: localhost\r\n"
+            b"Content-Length: 2\r\nConnection: close\r\n\r\n{}"
+        )
+        for path in ("/health", "/health/live", "/unknown"):
+            for framing in (
+                ("Content-Length: %d\r\n" % len(embedded_request)).encode(),
+                b"Transfer-Encoding: chunked\r\n",
+                b"Content-Length: 0\r\nContent-Length: 100\r\n",
+                b"Content-Length: +0\r\n",
+            ):
+                with self.subTest(path=path, framing=framing):
+                    with patch.object(main, "assess", wraps=main.assess) as analyze:
+                        with socket.create_connection(self.server.server_address, timeout=5) as client:
+                            client.sendall(
+                                ("GET %s HTTP/1.1\r\nHost: localhost\r\n" % path).encode()
+                                + framing + b"\r\n" + embedded_request
+                            )
+                            chunks = []
+                            while chunk := client.recv(4096):
+                                chunks.append(chunk)
+                        response = b"".join(chunks)
+                        self.assertTrue(response.startswith(b"HTTP/1.1 400 "), response)
+                        self.assertEqual(response.count(b"HTTP/1.1 "), 1, response)
+                        headers, body = response.split(b"\r\n\r\n", 1)
+                        self.assertIn(b"Content-Type: application/json", headers)
+                        self.assertIn("error", json.loads(body))
+                        analyze.assert_not_called()
+
+    def test_bodyless_get_requests_preserve_keep_alive(self):
+        connection = HTTPConnection(*self.server.server_address, timeout=5)
+        self.addCleanup(connection.close)
+        connection.connect()
+        original_socket = connection.sock
+        for headers in ({}, {"Content-Length": "0"}, {"Content-Length": " 00\t"}):
+            for path, status in (("/health", 200), ("/health/live", 200), ("/unknown", 404)):
+                with self.subTest(headers=headers, path=path):
+                    connection.request("GET", path, headers=headers)
+                    with connection.getresponse() as response:
+                        self.assertEqual(response.status, status)
+                        self.assertFalse(response.will_close)
+                        payload = json.load(response)
+                        self.assertEqual(payload, {"status": "ok"} if status == 200 else {"error": "not found"})
+                    self.assertIs(connection.sock, original_socket)
+
     def test_request_control_characters_are_escaped_in_access_log(self):
         output = io.StringIO()
         with patch.dict(os.environ, {"PULSE_ACCESS_LOG": "1"}):
