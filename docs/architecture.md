@@ -95,6 +95,8 @@ temp_c 可选，ts 缺失时由云端补 UTC 时间。
 
 AI 响应必须显式提供数值 `dominant_hz`、`peak_amplitude`、`low_band`、`mid_band`、`high_band`；缺失、`null` 或非数值特征按上游故障返回 502 并计入熔断，不写诊断或生成告警。全零特征合法；存量诊断日志格式不变。
 
+Python `/assess` 和 `/spectrum` 的 `values` 必须是数值数组，拒绝布尔、字符串、`null`、嵌套对象和无法表示为有限浮点数的超大整数，返回 JSON 400。频率参数同样只接受有限数值，不再把字符串或布尔值强制转成浮点数；省略时保留默认值，显式数值零仍按各字段的原有范围规则处理。
+
 # 验证
 
 Go：go test ./...（httpapi 4 个 + ingest 4 个）

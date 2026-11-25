@@ -311,6 +311,62 @@ class HTTPTest(unittest.TestCase):
         self.assertEqual(payload["level"], "normal")
         self.assertEqual(payload["rms"], 0.0)
 
+    def test_post_rejects_invalid_sample_types(self):
+        invalid_values = [None, False, 0, "", {}, {"0": 0}]
+        invalid_values.extend(
+            [invalid] + [0.0] * 1023
+            for invalid in (True, False, None, "0", [], {}, 10**400)
+        )
+        for path in ("/assess", "/spectrum"):
+            for index, values in enumerate(invalid_values):
+                with self.subTest(path=path, case=index):
+                    req = urllib.request.Request(
+                        self.base + path,
+                        data=json.dumps({"device_id": "motor-01", "values": values}).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with self.assertRaises(urllib.error.HTTPError) as ctx:
+                        urllib.request.urlopen(req, timeout=5).close()
+                    self.assertEqual(ctx.exception.code, 400)
+                    with ctx.exception as response:
+                        self.assertIn("error", json.load(response))
+
+    def test_post_spectrum_rejects_non_numeric_frequencies(self):
+        for field in ("sample_rate_hz", "rotation_hz"):
+            for invalid in (True, False, "1000", None, [], {}, 10**400):
+                with self.subTest(field=field, invalid=repr(invalid)):
+                    req = urllib.request.Request(
+                        self.base + "/spectrum",
+                        data=json.dumps({
+                            "device_id": "motor-01", "values": [0.0] * 1024, field: invalid,
+                        }).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with self.assertRaises(urllib.error.HTTPError) as ctx:
+                        urllib.request.urlopen(req, timeout=5).close()
+                    self.assertEqual(ctx.exception.code, 400)
+                    with ctx.exception as response:
+                        self.assertIn("error", json.load(response))
+
+    def test_post_spectrum_preserves_numeric_zeros_and_defaults(self):
+        for frequencies in ({}, {"sample_rate_hz": 1000, "rotation_hz": 0}):
+            with self.subTest(frequencies=frequencies):
+                req = urllib.request.Request(
+                    self.base + "/spectrum",
+                    data=json.dumps({
+                        "device_id": "motor-01", "event_id": "zero-waveform",
+                        "values": [0, 0.0] * 512, **frequencies,
+                    }).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    payload = json.load(response)
+                self.assertEqual(payload["fault"], "normal")
+                self.assertEqual(payload["event_id"], "zero-waveform")
+                for feature in ("dominant_hz", "peak_amplitude", "low_band", "mid_band", "high_band"):
+                    self.assertEqual(payload[feature], 0.0)
+
     def test_post_spectrum_bearing(self):
         values = [
             0.6 * math.sin(2.0 * math.pi * 120.0 * i / 1000.0) for i in range(1024)

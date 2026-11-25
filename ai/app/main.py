@@ -36,9 +36,17 @@ def level_of(z):
         return 'warning'
     return 'normal'
 
+def is_finite_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
 def assess(device_id, metric, values):
-    if len(values) > 10000 or any(not math.isfinite(v) for v in values):
-        raise ValueError('values must be finite and contain at most 10000 points')
+    if not isinstance(values, list) or len(values) > 10000 or any(not is_finite_number(value) for value in values):
+        raise ValueError('values must be an array of at most 10000 finite numbers')
     last = values[-1] if values else 0.0
     z = zscore(last, baseline(values))
     return {'device_id': device_id, 'metric': metric, 'last': last, 'rms': rms(values), 'z': round(z, 3), 'level': level_of(z)}
@@ -48,13 +56,13 @@ def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0, event_i
         raise ValueError('device_id must be a non-empty string of at most 64 characters')
     if not isinstance(event_id, str) or len(event_id) > 128:
         raise ValueError('event_id must be a string of at most 128 characters')
-    if len(values) != MAX_WAVEFORM_VALUES:
-        raise ValueError('values must contain exactly 1024 samples')
-    if not math.isfinite(sample_rate_hz) or not math.isfinite(rotation_hz):
-        raise ValueError('sample and rotation frequencies must be finite')
+    if not isinstance(values, list) or len(values) != MAX_WAVEFORM_VALUES:
+        raise ValueError('values must be an array of exactly 1024 samples')
+    if not is_finite_number(sample_rate_hz) or not is_finite_number(rotation_hz):
+        raise ValueError('sample and rotation frequencies must be finite numbers')
     if sample_rate_hz < MIN_DIAGNOSIS_SAMPLE_RATE_HZ or rotation_hz < 0 or sample_rate_hz < 2 * rotation_hz:
         raise ValueError('invalid sample_rate_hz or rotation_hz')
-    if any(not math.isfinite(v) for v in values):
+    if any(not is_finite_number(value) for value in values):
         raise ValueError('waveform values must be finite numbers')
     result = spectrum.diagnose(values, sample_rate_hz, rotation_hz)
     result['device_id'] = device_id
@@ -103,8 +111,8 @@ class H(BaseHTTPRequestHandler):
                 result = diagnose(
                     body.get('device_id', 'unknown'),
                     body.get('values', []),
-                    float(body.get('sample_rate_hz', 1000.0)),
-                    float(body.get('rotation_hz', 25.0)),
+                    body.get('sample_rate_hz', 1000.0),
+                    body.get('rotation_hz', 25.0),
                     body.get('event_id', ''),
                 )
                 self._send(result)

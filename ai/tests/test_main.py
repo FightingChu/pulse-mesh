@@ -42,6 +42,23 @@ class AssessTest(unittest.TestCase):
     def test_rms_value(self):
         self.assertAlmostEqual(main.rms([3.0, 4.0]), 3.5355339059327378)
 
+    def test_entry_points_reject_non_numeric_samples(self):
+        for invalid in (True, False, None, "0", [], {}, 10**400, float("inf"), float("nan")):
+            for operation in ("assess", "diagnose"):
+                with self.subTest(operation=operation, invalid=repr(invalid)):
+                    with self.assertRaises(ValueError):
+                        if operation == "assess":
+                            main.assess("motor-01", "vibration_rms", [0, invalid])
+                        else:
+                            main.diagnose("motor-01", [invalid] + [0.0] * 1023)
+
+    def test_diagnose_rejects_non_numeric_frequencies(self):
+        for field in ("sample_rate_hz", "rotation_hz"):
+            for invalid in (True, False, None, "1000", [], {}, 10**400, float("inf"), float("nan")):
+                with self.subTest(field=field, invalid=repr(invalid)):
+                    with self.assertRaises(ValueError):
+                        main.diagnose("motor-01", [0.0] * 1024, **{field: invalid})
+
 
 if __name__ == "__main__":
     unittest.main()
