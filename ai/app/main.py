@@ -143,7 +143,8 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         if os.environ.get('PULSE_ACCESS_LOG', '1') == '0':
             return
-        sys.stderr.write('%s %s\n' % (time.strftime('%Y-%m-%dT%H:%M:%S'), a[0] % a[1:]))
+        message = (a[0] % a[1:]).translate(self._control_char_table)
+        sys.stderr.write('%s %s\n' % (time.strftime('%Y-%m-%dT%H:%M:%S'), message))
 
 
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):

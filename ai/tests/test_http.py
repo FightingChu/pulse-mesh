@@ -1,3 +1,4 @@
+import io
 import json
 import math
 import os
@@ -268,6 +269,21 @@ class HTTPTest(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/health", timeout=5) as resp:
             self.assertEqual(resp.status, 200)
             self.assertEqual(json.load(resp), {"status": "ok"})
+
+    def test_request_control_characters_are_escaped_in_access_log(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {"PULSE_ACCESS_LOG": "1"}):
+            with patch.object(main.sys, "stderr", output):
+                with socket.create_connection(self.server.server_address, timeout=5) as client:
+                    client.sendall(b"GET /sensor\x1b[2J HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                    with HTTPResponse(client) as response:
+                        response.begin()
+                        self.assertEqual(response.status, 404)
+                        self.assertEqual(json.load(response), {"error": "not found"})
+        text = output.getvalue()
+        self.assertNotIn("\x1b", text)
+        self.assertIn(r"/sensor\x1b[2J", text)
+        self.assertEqual(text.count("\n"), 1)
 
     def test_unknown_get_route_is_not_found(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
