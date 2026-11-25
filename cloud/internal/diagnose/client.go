@@ -172,9 +172,33 @@ func (c *Client) doDiagnose(ctx context.Context, req Request) (Result, bool, err
 		return Result{}, resp.StatusCode >= http.StatusInternalServerError, fmt.Errorf("ai service returned %d", resp.StatusCode)
 	}
 
-	var result Result
-	if err := json.Unmarshal(payload, &result); err != nil {
+	var decoded struct {
+		Result
+		DominantHz    *float64 `json:"dominant_hz"`
+		PeakAmplitude *float64 `json:"peak_amplitude"`
+		LowBand       *float64 `json:"low_band"`
+		MidBand       *float64 `json:"mid_band"`
+		HighBand      *float64 `json:"high_band"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
 		return Result{}, true, fmt.Errorf("decode ai response: %w", err)
+	}
+	result := decoded.Result
+	for _, feature := range []struct {
+		name   string
+		value  *float64
+		target *float64
+	}{
+		{"dominant_hz", decoded.DominantHz, &result.DominantHz},
+		{"peak_amplitude", decoded.PeakAmplitude, &result.PeakAmplitude},
+		{"low_band", decoded.LowBand, &result.LowBand},
+		{"mid_band", decoded.MidBand, &result.MidBand},
+		{"high_band", decoded.HighBand, &result.HighBand},
+	} {
+		if feature.value == nil {
+			return Result{}, true, fmt.Errorf("invalid AI response: %s is required and must be a number", feature.name)
+		}
+		*feature.target = *feature.value
 	}
 	if err := validateResult(req, result); err != nil {
 		return Result{}, true, fmt.Errorf("invalid AI response: %w", err)

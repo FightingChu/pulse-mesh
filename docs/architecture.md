@@ -93,6 +93,8 @@ temp_c 可选，ts 缺失时由云端补 UTC 时间。
 
 诊断入口的 `values` 数组必须由 1024 个有限数值组成；任意位置的 `null`、布尔或字符串都返回 400，不会调用 AI、写诊断或生成告警，已存在 event_id 的重试也必须通过这项校验。显式数值 `0` 仍是合法采样。
 
+AI 响应必须显式提供数值 `dominant_hz`、`peak_amplitude`、`low_band`、`mid_band`、`high_band`；缺失、`null` 或非数值特征按上游故障返回 502 并计入熔断，不写诊断或生成告警。全零特征合法；存量诊断日志格式不变。
+
 # 验证
 
 Go：go test ./...（httpapi 4 个 + ingest 4 个）

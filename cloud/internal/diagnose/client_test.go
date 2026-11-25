@@ -33,11 +33,14 @@ func TestDiagnoseSuccess(t *testing.T) {
 			t.Errorf("event_id = %q", req.EventID)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"event_id":    req.EventID,
-			"device_id":   req.DeviceID,
-			"dominant_hz": 25.0,
-			"high_band":   0.1,
-			"fault":       "imbalance",
+			"event_id":       req.EventID,
+			"device_id":      req.DeviceID,
+			"dominant_hz":    25.0,
+			"peak_amplitude": 1.25,
+			"low_band":       0.2,
+			"mid_band":       0.7,
+			"high_band":      0.1,
+			"fault":          "imbalance",
 		})
 	}))
 	defer server.Close()
@@ -56,6 +59,9 @@ func TestDiagnoseSuccess(t *testing.T) {
 	}
 	if result.DiagnosedAt.IsZero() {
 		t.Fatal("diagnosed_at was not stamped")
+	}
+	if result.DominantHz != 25 || result.PeakAmplitude != 1.25 || result.LowBand != 0.2 || result.MidBand != 0.7 || result.HighBand != 0.1 {
+		t.Fatalf("spectrum features were changed: %+v", result)
 	}
 }
 
@@ -118,7 +124,8 @@ func TestDiagnoseRejectsOversizedResponse(t *testing.T) {
 
 func TestDiagnoseAllowsResponseAtSizeLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body := `{"device_id":"motor-01","event_id":"event-1","fault":"normal","padding":"` + strings.Repeat("x", (1<<20)-100) + `"}`
+		body := `{"device_id":"motor-01","event_id":"event-1","fault":"normal","dominant_hz":0,"peak_amplitude":0,"low_band":0,"mid_band":0,"high_band":0,"padding":""}`
+		body = strings.TrimSuffix(body, `"}`) + strings.Repeat("x", (1<<20)-len(body)) + `"}`
 		payload := []byte(body)
 		if len(payload) > 1<<20 {
 			t.Fatalf("test response length %d exceeds target", len(payload))
