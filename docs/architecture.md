@@ -53,6 +53,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - 日志和请求计数保留实际写出的首个最终状态码，后续重复 `WriteHeader` 不覆盖；100/103 等临时响应不作为最终状态，101 协议切换除外。
 - GET /metrics 输出 Prometheus 文本，计数器按方法、路径、状态码聚合，告警确认路径归一化为 /api/v1/alerts/{id}/ack。
 - 所有响应带 CORS 头，OPTIONS 预检直接返回 204。
+- OPTIONS 预检同样记录访问日志并按 204 计数，不进入业务处理；对 `/metrics` 的预检不算 scrape，正常 scrape 仍只计数一次。
 - 服务设置 ReadHeader 5s、Read 15s、Write 15s、Idle 60s 超时，收到 SIGINT/SIGTERM 后 10s 内优雅退出。
 - AI 服务用 ThreadingHTTPServer，支持并发请求，访问日志默认开启，可用 PULSE_ACCESS_LOG=0 关闭。
 - Python AI 自定义访问日志复用标准 HTTP 处理器的控制字符转义表，避免请求行中的终端控制序列生效；保留时间戳、普通 Unicode 文本及日志关闭开关。

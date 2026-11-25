@@ -123,7 +123,7 @@ func withLogging(metrics *Metrics, next http.Handler) http.Handler {
 		if rec.status == 0 {
 			rec.status = http.StatusOK
 		}
-		if normalizePath(r.URL.Path) != "/metrics" {
+		if normalizePath(r.URL.Path) != "/metrics" || r.Method == http.MethodOptions {
 			metrics.observe(r.Method, r.URL.Path, rec.status)
 		}
 		log.Printf("%q %q %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Microsecond))
