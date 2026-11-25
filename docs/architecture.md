@@ -80,6 +80,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - AI 客户端自身的超时（等待响应头或读取正文）计入熔断；只有传入的调用方 context 已取消或到期且错误匹配时，才不计入 AI 故障。
 - 熔断器按状态代次跟踪在途请求；开路后旧请求的迟到成功、取消或失败不改变新状态，也不会释放当前恢复探测的名额。
 - Python AI HTTP 服务最多 8 个 worker，最多排队 16 个连接；饱和时返回 503/Retry-After: 1，socket 请求读取超时 5 秒，可用 PULSE_AI_MAX_WORKERS 设置 1-64 worker。
+- 过载拒绝线程构造或启动失败时，释放对应名额、移除线程登记并关闭连接，保留原始异常，不影响后续过载请求的处理。
 - 云端同时最多运行 4 个频谱诊断请求，超额返回 429 和 Retry-After，避免波形计算与等待 AI 无界堆积。
 - 网关将每 10 条遥测合并到 POST /api/v1/samples/batch，批量上限 100；服务先校验整批，再逐条幂等写入，响应分别报告 stored / duplicates / alerts。
 - GET /api/v1/samples 与 GET /api/v1/diagnoses 支持 limit=1..100，默认 100，拒绝超界参数。

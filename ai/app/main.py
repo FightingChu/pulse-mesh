@@ -190,6 +190,7 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             if not self._rejection_slots.acquire(blocking=False):
                 self.shutdown_request(request)
                 return
+            thread = None
             try:
                 thread = threading.Thread(
                     target=self._reject_overloaded_request,

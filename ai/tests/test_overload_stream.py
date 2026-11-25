@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
 
@@ -136,6 +137,39 @@ class OverloadStreamTest(unittest.TestCase):
                 client = self.reject([header])
                 self.assertFalse(client.read_past_body)
                 self.assertTrue(client.response.startswith(b'HTTP/1.1 503 '))
+
+    def test_rejection_worker_startup_failure_releases_resources(self):
+        for failure_stage in ('construct', 'start'):
+            with self.subTest(stage=failure_stage):
+                server = main.BoundedThreadingHTTPServer(
+                    ('127.0.0.1', 0), main.H, max_workers=1, max_rejection_workers=1
+                )
+                self.addCleanup(server.server_close)
+                self.assertTrue(server._worker_slots.acquire(blocking=False))
+                self.addCleanup(server._worker_slots.release)
+                client = ScriptedSocket([])
+                failure = RuntimeError('rejection worker startup failed')
+                with patch.object(main.threading, 'Thread') as thread_factory:
+                    if failure_stage == 'construct':
+                        thread_factory.side_effect = failure
+                    else:
+                        thread_factory.return_value.start.side_effect = failure
+                    with self.assertRaises(RuntimeError) as ctx:
+                        server.process_request(client, ('127.0.0.1', 1))
+                    self.assertIs(ctx.exception, failure)
+                self.assertTrue(client.closed, 'failed worker left its connection open')
+                self.assertEqual(server._rejection_threads, set())
+                self.assertFalse(server._worker_slots.acquire(blocking=False))
+                self.assertTrue(server._rejection_slots.acquire(blocking=False))
+                self.assertFalse(server._rejection_slots.acquire(blocking=False))
+                server._rejection_slots.release()
+
+                retry = ScriptedSocket([b'GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n'])
+                server.process_request(retry, ('127.0.0.1', 2))
+                server.server_close()
+                self.assertTrue(retry.closed)
+                self.assertTrue(retry.response.startswith(b'HTTP/1.1 503 '))
+                self.assertEqual(server._rejection_threads, set())
 
 
 if __name__ == '__main__':
