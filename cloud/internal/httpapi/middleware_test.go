@@ -90,3 +90,54 @@ func TestMetricsNormalizesAckPath(t *testing.T) {
 		t.Fatalf("ack path was not normalized: %s", body)
 	}
 }
+
+func TestMetricsNormalizesUnknownMethodsThroughHTTP(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+	for _, path := range []string{"/api/v1/samples", "/metrics"} {
+		for _, method := range []string{"CUSTOM", "get", "GET|spoof|200"} {
+			request, err := http.NewRequest(method, server.URL+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, readErr := io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			wantStatus := http.StatusMethodNotAllowed
+			if path == "/metrics" {
+				wantStatus = http.StatusOK
+			}
+			if response.StatusCode != wantStatus {
+				t.Fatalf("%s %s returned %d, want %d", method, path, response.StatusCode, wantStatus)
+			}
+		}
+	}
+	response, err := server.Client().Get(server.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		`pulse_http_requests_total{method="OTHER",path="/api/v1/samples",status="405"} 3`,
+		`pulse_http_requests_total{method="OTHER",path="/metrics",status="200"} 3`,
+		`pulse_http_requests_total{method="GET",path="/metrics",status="200"} 1`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing metric %s in %s", want, text)
+		}
+	}
+	if strings.Contains(text, "CUSTOM") || strings.Contains(text, "spoof") || strings.Contains(text, `method="get"`) {
+		t.Errorf("untrusted method leaked into metric labels: %s", text)
+	}
+}

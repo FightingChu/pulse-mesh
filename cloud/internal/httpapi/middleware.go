@@ -62,6 +62,12 @@ func normalizePath(path string) string {
 }
 
 func (m *Metrics) observe(method, path string, status int) {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace:
+	default:
+		method = "OTHER"
+	}
 	key := fmt.Sprintf("%s|%s|%d", method, normalizePath(path), status)
 	m.mu.Lock()
 	m.counts[key]++
