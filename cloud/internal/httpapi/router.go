@@ -186,11 +186,12 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		var req diagnose.Request
-		if err := decodeJSON(w, r, &req); err != nil {
+		var input diagnosisInput
+		if err := decodeJSON(w, r, &input); err != nil {
 			writeDecodeError(w, err)
 			return
 		}
+		req := input.Request
 		if req.DeviceID == "" || len(req.Values) == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "device_id and values are required"})
 			return
