@@ -69,6 +69,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - GET /api/v1/samples 与 GET /api/v1/diagnoses 支持 limit=1..100，默认 100，拒绝超界参数。
 - 持久化批量先编码整批，再一次追加并 fsync，成功后才改内存状态；降低磁盘同步次数并避免半批写入。
 - `/health/live` 只报告进程存活；`/health/ready` 检查样本、诊断、告警存储可用性。Kubernetes 分别用作 liveness 和 readiness probe。
+- 样本、诊断、告警存储的 `Close` 可重复调用；关闭后所有写入入口（含空批次、重复事件和告警确认）返回 `journal.ErrClosed`，API 映射为 503，readiness 返回 `not_ready`。列表和计数保留已有内存快照；诊断 `Get` 关闭后不再命中，诊断请求在调用 AI 前检查存储可用性。
 - `/metrics` 响应在快照前计入本次 scrape；外层请求日志不重复增加该计数。
 
 # 判据

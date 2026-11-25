@@ -31,6 +31,7 @@ type Store struct {
 	seen         map[[sha256.Size]byte]struct{}
 	file         *os.File
 	writesFailed uint64
+	closed       bool
 }
 
 func NewStore() *Store { return &Store{seen: make(map[[sha256.Size]byte]struct{})} }
@@ -110,6 +111,11 @@ func (s *Store) Add(v Sample) (bool, error) {
 }
 
 func (s *Store) AddBatch(samples []Sample) ([]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, journal.ErrClosed
+	}
 	if len(samples) == 0 {
 		return []bool{}, nil
 	}
@@ -120,8 +126,6 @@ func (s *Store) AddBatch(samples []Sample) ([]bool, error) {
 		}
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	added := make([]bool, len(prepared))
 	batchSeen := make(map[[sha256.Size]byte]struct{}, len(prepared))
 	encoded := make([][]byte, 0, len(prepared))
@@ -202,6 +206,9 @@ func (s *Store) Count() int { s.mu.Lock(); defer s.mu.Unlock(); return len(s.ite
 func (s *Store) Check() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return journal.ErrClosed
+	}
 	if s.file == nil {
 		return nil
 	}
@@ -214,8 +221,11 @@ func (s *Store) Check() error {
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.file == nil {
+	if s.closed || s.file == nil {
+		s.closed = true
 		return nil
 	}
-	return s.file.Close()
+	err := s.file.Close()
+	s.closed = true
+	return err
 }

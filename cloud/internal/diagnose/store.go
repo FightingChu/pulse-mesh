@@ -21,6 +21,7 @@ type Store struct {
 	seen         map[[sha256.Size]byte]struct{}
 	file         *os.File
 	writesFailed uint64
+	closed       bool
 }
 
 func NewStore(limit int) *Store {
@@ -100,6 +101,9 @@ func (s *Store) addMemory(r Result) bool {
 func (s *Store) Add(r Result) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return false, journal.ErrClosed
+	}
 	key := resultKey(r.DeviceID, r.EventID)
 	if r.EventID != "" {
 		if _, exists := s.seen[key]; exists {
@@ -128,6 +132,9 @@ func (s *Store) Get(device, eventID string) (Result, bool) {
 	key := resultKey(device, eventID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return Result{}, false
+	}
 	for i := len(s.items) - 1; i >= 0; i-- {
 		if resultKey(s.items[i].DeviceID, s.items[i].EventID) == key {
 			return s.items[i], true
@@ -179,6 +186,9 @@ func (s *Store) Stats() (int, int64, uint64) {
 func (s *Store) Check() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return journal.ErrClosed
+	}
 	if s.file == nil {
 		return nil
 	}
@@ -191,8 +201,11 @@ func (s *Store) Check() error {
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.file == nil {
+	if s.closed || s.file == nil {
+		s.closed = true
 		return nil
 	}
-	return s.file.Close()
+	err := s.file.Close()
+	s.closed = true
+	return err
 }

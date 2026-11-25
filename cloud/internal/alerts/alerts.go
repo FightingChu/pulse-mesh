@@ -42,6 +42,7 @@ type Engine struct {
 	maxKeep      int
 	file         *os.File
 	writesFailed uint64
+	closed       bool
 }
 
 func New(window time.Duration) *Engine {
@@ -186,11 +187,14 @@ func (e *Engine) EvaluateWithError(s ingest.Sample) (*Alert, error) {
 }
 
 func (e *Engine) EvaluateBatchWithError(samples []ingest.Sample) ([]Alert, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil, journal.ErrClosed
+	}
 	if len(samples) == 0 {
 		return []Alert{}, nil
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	now := time.Now().UTC()
 	seenEvents := make(map[[sha256.Size]byte]struct{}, len(samples))
@@ -216,11 +220,14 @@ func (e *Engine) EvaluateBatchWithError(samples []ingest.Sample) ([]Alert, error
 }
 
 func (e *Engine) EvaluateFaultEventBatchWithError(deviceID string, events []FaultEvent) ([]Alert, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil, journal.ErrClosed
+	}
 	if len(events) == 0 {
 		return []Alert{}, nil
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	now := time.Now().UTC()
 	seenEvents := make(map[[sha256.Size]byte]struct{}, len(events))
@@ -391,9 +398,6 @@ func (e *Engine) EvaluateFaultWithError(deviceID, fault string) (*Alert, error) 
 
 func (e *Engine) EvaluateFaultEventWithError(deviceID, eventID, fault string) (*Alert, error) {
 	level := FaultLevel(fault)
-	if level == "" {
-		return nil, nil
-	}
 	message := fmt.Sprintf("%s detected on %s", fault, deviceID)
 	return e.raise(eventID, deviceID, "fault:"+fault, level, 0, message)
 }
@@ -410,6 +414,12 @@ func (e *Engine) raise(eventID, deviceID, metric, level string, value float64, m
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.closed {
+		return nil, journal.ErrClosed
+	}
+	if level == "" {
+		return nil, nil
+	}
 	if eventID != "" {
 		if _, exists := e.eventSeen[eventKey]; exists {
 			return nil, nil
@@ -473,6 +483,9 @@ func (e *Engine) Ack(id string) bool {
 func (e *Engine) AckWithError(id string) (bool, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.closed {
+		return false, journal.ErrClosed
+	}
 
 	for i := range e.items {
 		if e.items[i].ID != id {
@@ -505,15 +518,21 @@ func (e *Engine) ackMemory(id string, at time.Time) {
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.file == nil {
+	if e.closed || e.file == nil {
+		e.closed = true
 		return nil
 	}
-	return e.file.Close()
+	err := e.file.Close()
+	e.closed = true
+	return err
 }
 
 func (e *Engine) Check() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.closed {
+		return journal.ErrClosed
+	}
 	if e.file == nil {
 		return nil
 	}

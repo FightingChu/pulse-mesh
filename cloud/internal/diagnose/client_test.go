@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"pulse-mesh/cloud/internal/diagnose"
+	"pulse-mesh/cloud/internal/journal"
 )
 
 func TestDiagnoseSuccess(t *testing.T) {
@@ -341,5 +342,35 @@ func TestOpenStoreRestoresDiagnosisAndEventIndex(t *testing.T) {
 	}
 	if added, err := second.Add(result); added || err != nil {
 		t.Fatalf("restored event should deduplicate, added=%v err=%v", added, err)
+	}
+}
+
+func TestClosedStoreRejectsWritesAndGetButKeepsSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diagnoses.jsonl")
+	store, err := diagnose.OpenStore(path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := diagnose.Result{DeviceID: "motor-01", EventID: "close-1", Fault: "normal"}
+	if added, err := store.Add(result); err != nil || !added {
+		t.Fatalf("add = %v, %v", added, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("second close = %v", err)
+	}
+	if err := store.Check(); !errors.Is(err, journal.ErrClosed) {
+		t.Fatalf("check error = %v, want ErrClosed", err)
+	}
+	if added, err := store.Add(result); added || !errors.Is(err, journal.ErrClosed) {
+		t.Fatalf("add after close = %v, %v", added, err)
+	}
+	if _, ok := store.Get("motor-01", "close-1"); ok {
+		t.Fatal("Get should reject access after store close")
+	}
+	if got := store.Count(); got != 1 {
+		t.Fatalf("cached count = %d, want 1", got)
 	}
 }

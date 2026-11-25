@@ -94,6 +94,41 @@ func TestHealthReadinessAndLiveness(t *testing.T) {
 	}
 }
 
+func TestClosedStoresReturnUnavailable(t *testing.T) {
+	sampleStore := ingest.NewStore()
+	diagnosisStore := diagnose.NewStore(10)
+	alertEngine := alerts.New(time.Minute)
+	if err := sampleStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := diagnosisStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := alertEngine.Close(); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(httpapi.New(sampleStore, alertEngine, diagnose.NewClient("http://127.0.0.1:1"), diagnosisStore))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/health/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("ready status = %d, want 503", resp.StatusCode)
+	}
+
+	resp, err = http.Post(srv.URL+"/api/v1/samples", "application/json", strings.NewReader(`{"device_id":"motor-01","metric":"v","value":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("sample write status = %d, want 503", resp.StatusCode)
+	}
+}
+
 func TestPostThenList(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"pulse-mesh/cloud/internal/alerts"
 	"pulse-mesh/cloud/internal/ingest"
+	"pulse-mesh/cloud/internal/journal"
 )
 
 func sample(level string) ingest.Sample {
@@ -143,6 +145,91 @@ func TestOpenStoreRestoresAckAndDedupState(t *testing.T) {
 	createdNext, err := second.EvaluateWithError(next)
 	if err != nil || createdNext == nil || createdNext.ID != "alert-2" {
 		t.Fatalf("next alert = %+v, %v", createdNext, err)
+	}
+}
+
+func TestClosedAlertEngineRejectsWritesAndReadiness(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.jsonl")
+	engine, err := alerts.OpenStore(path, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := engine.EvaluateWithError(sample("critical"))
+	if err != nil || created == nil {
+		t.Fatalf("create alert = %+v, %v", created, err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Close(); err != nil {
+		t.Fatalf("second close = %v", err)
+	}
+	if err := engine.Check(); !errors.Is(err, journal.ErrClosed) {
+		t.Fatalf("check error = %v, want ErrClosed", err)
+	}
+	if alert, err := engine.EvaluateWithError(sample("warning")); alert != nil || !errors.Is(err, journal.ErrClosed) {
+		t.Fatalf("evaluate after close = %+v, %v", alert, err)
+	}
+	if acked, err := engine.AckWithError(created.ID); acked || !errors.Is(err, journal.ErrClosed) {
+		t.Fatalf("ack after close = %v, %v", acked, err)
+	}
+	if got := len(engine.List("", true)); got != 1 {
+		t.Fatalf("cached alerts = %d, want 1", got)
+	}
+}
+
+func TestClosedAlertEngineRejectsNoopAndDuplicateWrites(t *testing.T) {
+	for _, mode := range []string{"memory", "journal"} {
+		t.Run(mode, func(t *testing.T) {
+			path := ""
+			if mode == "journal" {
+				path = filepath.Join(t.TempDir(), "alerts.jsonl")
+			}
+			engine, err := alerts.OpenStore(path, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = engine.Close() })
+			event := sample("critical")
+			event.EventID = "before-close"
+			created, err := engine.EvaluateWithError(event)
+			if err != nil || created == nil {
+				t.Fatalf("initial alert = %+v, %v", created, err)
+			}
+			if err := engine.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := engine.Close(); err != nil {
+				t.Errorf("repeated close: %v", err)
+			}
+			for _, batch := range [][]ingest.Sample{nil, {event}, {sample("normal")}} {
+				if created, err := engine.EvaluateBatchWithError(batch); len(created) != 0 || !errors.Is(err, journal.ErrClosed) {
+					t.Errorf("sample batch after close = %+v, %v", created, err)
+				}
+			}
+			for _, fault := range []string{"normal", "bearing_wear"} {
+				if created, err := engine.EvaluateFaultEventWithError("motor-01", "fault-event", fault); created != nil || !errors.Is(err, journal.ErrClosed) {
+					t.Errorf("fault %q after close = %+v, %v", fault, created, err)
+				}
+			}
+			for _, batch := range [][]alerts.FaultEvent{nil, {{EventID: "fault-event", Fault: "normal"}}} {
+				if created, err := engine.EvaluateFaultEventBatchWithError("motor-01", batch); len(created) != 0 || !errors.Is(err, journal.ErrClosed) {
+					t.Errorf("fault batch after close = %+v, %v", created, err)
+				}
+			}
+			for _, alertID := range []string{created.ID, "missing"} {
+				if acked, err := engine.AckWithError(alertID); acked || !errors.Is(err, journal.ErrClosed) {
+					t.Errorf("ack after close = %v, %v", acked, err)
+				}
+			}
+			retained := engine.List("", true)
+			if len(retained) != 1 || retained[0].Acked {
+				t.Fatalf("closed writes changed snapshot: %+v", retained)
+			}
+			if err := engine.Check(); !errors.Is(err, journal.ErrClosed) {
+				t.Errorf("readiness after close: %v", err)
+			}
+		})
 	}
 }
 

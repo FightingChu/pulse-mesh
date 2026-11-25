@@ -16,6 +16,7 @@ const MaxJournalBytes = 256 * 1024 * 1024
 
 var appendLocks sync.Map
 var ErrCapacity = errors.New("journal capacity reached")
+var ErrClosed = errors.New("journal is closed")
 
 type SyncFile interface {
 	Stat() (os.FileInfo, error)

@@ -220,6 +220,10 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				return
 			}
 		}
+		if err := diagnoses.Check(); err != nil {
+			writeStorageError(w, err, "diagnosis storage unavailable")
+			return
+		}
 		if req.EventID != "" {
 			if previous, ok := diagnoses.Get(req.DeviceID, req.EventID); ok {
 				alert, err := engine.EvaluateFaultEventWithError(previous.DeviceID, previous.EventID, previous.Fault)
@@ -312,6 +316,8 @@ func writeStorageError(w http.ResponseWriter, err error, message string) {
 	status := http.StatusInternalServerError
 	if errors.Is(err, journal.ErrCapacity) {
 		status = http.StatusInsufficientStorage
+	} else if errors.Is(err, journal.ErrClosed) {
+		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, map[string]string{"error": message})
 }

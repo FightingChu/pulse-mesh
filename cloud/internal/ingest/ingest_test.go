@@ -2,11 +2,15 @@ package ingest_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"pulse-mesh/cloud/internal/ingest"
+	"pulse-mesh/cloud/internal/journal"
 )
 
 const firmwareLine = `{"device_id":"motor-01","metric":"vibration_rms","value":4.80,"level":"critical","temp_c":57.0}`
@@ -169,5 +173,113 @@ func TestAddBatchDeduplicatesInsideBatchAndAcrossRestarts(t *testing.T) {
 	}
 	if got := reopened.Count(); got != 2 {
 		t.Fatalf("reopened count = %d, want 2", got)
+	}
+}
+
+func TestClosedStoreRejectsWritesAndReadinessButKeepsSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "samples.jsonl")
+	store, err := ingest.OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := ingest.Sample{EventID: "close-1", DeviceID: "motor-01", Metric: "vibration", Value: 1}
+	if added, err := store.Add(event); err != nil || !added {
+		t.Fatalf("add = %v, %v", added, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("second close = %v", err)
+	}
+	if err := store.Check(); !errors.Is(err, journal.ErrClosed) {
+		t.Fatalf("check error = %v, want ErrClosed", err)
+	}
+	if added, err := store.Add(event); added || !errors.Is(err, journal.ErrClosed) {
+		t.Fatalf("write after close = %v, %v", added, err)
+	}
+	if count := len(store.List("motor-01", 10)); count != 1 {
+		t.Fatalf("cached snapshot count = %d, want 1", count)
+	}
+}
+
+func TestCloseRejectsEveryBatchInBothStorageModes(t *testing.T) {
+	for _, mode := range []string{"memory", "journal"} {
+		t.Run(mode, func(t *testing.T) {
+			path := ""
+			if mode == "journal" {
+				path = filepath.Join(t.TempDir(), "samples.jsonl")
+			}
+			store, err := ingest.OpenStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			event := ingest.Sample{EventID: "before-close", DeviceID: "motor-01", Metric: "v", Value: 1}
+			if added, err := store.Add(event); !added || err != nil {
+				t.Fatalf("initial add = %v, %v", added, err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatalf("repeated close: %v", err)
+			}
+			for _, batch := range [][]ingest.Sample{
+				nil,
+				{},
+				{event},
+				{{EventID: "after-close", DeviceID: "motor-01", Metric: "v", Value: 2}},
+			} {
+				if added, err := store.AddBatch(batch); len(added) != 0 || !errors.Is(err, journal.ErrClosed) {
+					t.Errorf("batch after close = %v, %v", added, err)
+				}
+			}
+			if err := store.Check(); !errors.Is(err, journal.ErrClosed) {
+				t.Errorf("readiness after close: %v", err)
+			}
+			if store.Count() != 1 || store.List("motor-01", 1)[0].EventID != event.EventID {
+				t.Fatal("closed writes changed retained snapshot")
+			}
+		})
+	}
+}
+
+func TestConcurrentCloseAndBatchWritesPreserveJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "samples.jsonl")
+	store, err := ingest.OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for index := 0; index < 16; index++ {
+		workers.Add(1)
+		go func(sequence int) {
+			defer workers.Done()
+			<-start
+			batch := []ingest.Sample{{EventID: fmt.Sprintf("concurrent-%d", sequence), DeviceID: "motor-01", Metric: "v", Value: float64(sequence)}}
+			if _, err := store.AddBatch(batch); err != nil && !errors.Is(err, journal.ErrClosed) {
+				t.Errorf("concurrent write: %v", err)
+			}
+		}(index)
+	}
+	close(start)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	countAtClose := store.Count()
+	workers.Wait()
+	if store.Count() != countAtClose {
+		t.Fatal("writes changed memory after Close returned")
+	}
+	reopened, err := ingest.OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if reopened.Count() != countAtClose {
+		t.Fatalf("journal restored %d records, want %d", reopened.Count(), countAtClose)
 	}
 }
