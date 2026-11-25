@@ -252,12 +252,14 @@ pub fn waveform(
         return Vec::new();
     }
     let two_pi = std::f64::consts::TAU;
+    let rotation_step = two_pi * (rotation_hz / sample_rate_hz);
+    let bearing_step = two_pi * (120.0 / sample_rate_hz);
     (0..n)
-        .map(|i| {
-            let t = i as f64 / sample_rate_hz;
-            let fundamental = (two_pi * rotation_hz * t).sin();
-            let harmonic = 0.15 * (two_pi * 2.0 * rotation_hz * t).sin();
-            let bearing = bearing_amplitude * (two_pi * 120.0 * t).sin();
+        .map(|index| {
+            let phase = rotation_step * index as f64;
+            let fundamental = phase.sin();
+            let harmonic = 0.15 * (2.0 * phase).sin();
+            let bearing = bearing_amplitude * (bearing_step * index as f64).sin();
             fundamental + harmonic + bearing
         })
         .collect()

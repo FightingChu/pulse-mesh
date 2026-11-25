@@ -37,6 +37,8 @@ GET /api/v1/alerts?device=motor-01&include_acked=1 查询，POST /api/v1/alerts/
 PULSE_SAMPLE_INTERVAL_MS、PULSE_SAMPLE_RATE_HZ、PULSE_ROTATION_HZ 配置。诊断采样率至少 240 Hz，
 以捕获 120 Hz 轴承特征；AI 和云端 API 使用相同下限。采样点数 1-100，采样率需满足转频 Nyquist 条件。默认一轮 10 点、每点 200 ms。
 
+Rust 波形合成先计算频率与采样率之比，再生成逐点相位，避免合法大频率配置在中间乘法中溢出成 `NaN`；普通配置仍保留基频、二次谐波和 120 Hz 轴承分量。
+
 - bearing_wear / misalignment -> critical
 - imbalance / looseness -> warning
 - normal -> 不告警
