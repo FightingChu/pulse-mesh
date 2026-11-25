@@ -277,13 +277,15 @@ const char* classify_fault(const Spectrum& s, double rotation_hz) {
 
 void synthesize_waveform(double* out, std::size_t n, double sample_rate_hz,
                          double rotation_hz, double bearing_amplitude) {
-  for (std::size_t i = 0; i < n; i++) {
-    const double t = (double)i / sample_rate_hz;
-    const double fundamental = std::sin(2.0 * kPi * rotation_hz * t);
-    const double harmonic = 0.15 * std::sin(2.0 * kPi * 2.0 * rotation_hz * t);
+  const double rotation_step = 2.0 * kPi * (rotation_hz / sample_rate_hz);
+  const double bearing_step = 2.0 * kPi * (120.0 / sample_rate_hz);
+  for (std::size_t index = 0; index < n; index++) {
+    const double phase = rotation_step * (double)index;
+    const double fundamental = std::sin(phase);
+    const double harmonic = 0.15 * std::sin(2.0 * phase);
     const double bearing =
-        bearing_amplitude * std::sin(2.0 * kPi * 120.0 * t);
-    out[i] = fundamental + harmonic + bearing;
+        bearing_amplitude * std::sin(bearing_step * (double)index);
+    out[index] = fundamental + harmonic + bearing;
   }
 }
 

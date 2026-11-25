@@ -110,6 +110,52 @@ int main() {
     }
   }
 
+  std::vector<double> synthesized(1024);
+  for (double rotation : {1e307, 2e307, 4e307}) {
+    synthesize_waveform(synthesized.data(), synthesized.size(), 1e308, rotation, 0.0);
+    double maximum_error = 0.0;
+    bool all_finite = true;
+    for (std::size_t index = 0; index < synthesized.size(); index++) {
+      const double phase = 2.0 * kPiTest * (rotation / 1e308) * (double)index;
+      const double expected = std::sin(phase) + 0.15 * std::sin(2.0 * phase);
+      if (!std::isfinite(synthesized[index])) {
+        all_finite = false;
+        break;
+      }
+      const double error = std::fabs(synthesized[index] - expected);
+      if (error > maximum_error) maximum_error = error;
+    }
+    if (!all_finite) {
+      std::printf("FAIL synthesized large-frequency signal: rotation %.17g\n", rotation);
+      failures++;
+    } else {
+      expect_near("synthesized large-frequency signal", maximum_error, 0.0, 1e-10);
+    }
+  }
+  for (double rotation : {0.0, 25.0, 30.0}) {
+    synthesize_waveform(synthesized.data(), synthesized.size(), 1000.0, rotation, 0.6);
+    double maximum_error = 0.0;
+    bool all_finite = true;
+    for (std::size_t index = 0; index < synthesized.size(); index++) {
+      const double sample_time = (double)index / 1000.0;
+      const double expected = std::sin(2.0 * kPiTest * rotation * sample_time) +
+          0.15 * std::sin(2.0 * kPiTest * 2.0 * rotation * sample_time) +
+          0.6 * std::sin(2.0 * kPiTest * 120.0 * sample_time);
+      if (!std::isfinite(synthesized[index])) {
+        all_finite = false;
+        break;
+      }
+      const double error = std::fabs(synthesized[index] - expected);
+      if (error > maximum_error) maximum_error = error;
+    }
+    if (!all_finite) {
+      std::printf("FAIL synthesized ordinary signal: rotation %.17g\n", rotation);
+      failures++;
+    } else {
+      expect_near("synthesized ordinary signal components", maximum_error, 0.0, 1e-12);
+    }
+  }
+
   std::vector<double> sine(1024);
   for (std::size_t i = 0; i < sine.size(); i++) {
     sine[i] = std::sin(2.0 * 3.14159265358979323846 * 25.0 * (double)i / 1000.0);
