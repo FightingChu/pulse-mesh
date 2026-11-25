@@ -117,9 +117,7 @@ class H(BaseHTTPRequestHandler):
                 return
             text = (raw or b'{}').decode('utf-8')
             decoder = json.JSONDecoder(parse_constant=lambda value: (_ for _ in ()).throw(ValueError('invalid numeric constant: ' + value)))
-            body, end = decoder.raw_decode(text.lstrip())
-            if text.lstrip()[end:].strip():
-                raise ValueError('request must contain a single JSON value')
+            body = decoder.decode(text)
             if not isinstance(body, dict):
                 raise ValueError('request body must be a JSON object')
             path = urlparse(self.path).path

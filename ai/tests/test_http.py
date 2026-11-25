@@ -505,6 +505,42 @@ class HTTPTest(unittest.TestCase):
         with ctx.exception as response:
             self.assertEqual(response.code, 400)
 
+    def test_post_rejects_non_json_whitespace_before_analysis(self):
+        body = json.dumps({"device_id": "motor-01", "values": [0.0] * 1024})
+        for path, operation in (("/assess", "assess"), ("/spectrum", "diagnose")):
+            for whitespace in ("\v", "\f", "\u00a0", "\u2003", "\u2028"):
+                for text in (whitespace + body, body + whitespace):
+                    with self.subTest(path=path, prefix=repr(text[:1]), suffix=repr(text[-1:])):
+                        request = urllib.request.Request(
+                            self.base + path,
+                            data=text.encode("utf-8"),
+                            headers={"Content-Type": "application/json"},
+                        )
+                        with patch.object(main, operation, wraps=getattr(main, operation)) as analyze:
+                            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                                urllib.request.urlopen(request, timeout=5).close()
+                            with ctx.exception as response:
+                                self.assertEqual(response.code, 400)
+                                self.assertEqual(response.headers.get_content_type(), "application/json")
+                                self.assertIn("error", json.load(response))
+                            analyze.assert_not_called()
+
+    def test_post_preserves_json_whitespace_and_unicode_strings(self):
+        device = "电机\u00a0\u2003\u2028east"
+        body = json.dumps({"device_id": device, "values": [0.0] * 1024}, ensure_ascii=False)
+        for path, field in (("/assess", "level"), ("/spectrum", "fault")):
+            with self.subTest(path=path):
+                request = urllib.request.Request(
+                    self.base + path,
+                    data=(" \t\r\n" + body + "\n\r\t ").encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    payload = json.load(response)
+                self.assertEqual(payload["device_id"], device)
+                self.assertEqual(payload[field], "normal")
+
     def test_post_rejects_oversized_body(self):
         address = self.server.server_address
         with socket.create_connection(address, timeout=5) as client:
