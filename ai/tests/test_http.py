@@ -8,7 +8,9 @@ import time
 import unittest
 import urllib.request
 import urllib.error
+from http.client import HTTPConnection, HTTPResponse
 from http.server import HTTPServer
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
@@ -505,6 +507,51 @@ class HTTPTest(unittest.TestCase):
             )
             response = client.recv(1024)
         self.assertIn(b"413", response)
+
+    def test_post_rejects_truncated_body_before_analysis(self):
+        for path, operation in (("/assess", "assess"), ("/spectrum", "diagnose")):
+            complete_body = json.dumps({"device_id": "motor-01", "values": [0.0] * 1024}).encode()
+            for body in (b"", b'{"values":', complete_body):
+                with self.subTest(path=path, received=len(body)):
+                    with patch.object(main, operation, wraps=getattr(main, operation)) as analyze:
+                        with socket.create_connection(self.server.server_address, timeout=5) as client:
+                            client.sendall(
+                                ("POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Length: %d\r\n\r\n" % (path, len(body) + 1)).encode()
+                                + body
+                            )
+                            client.shutdown(socket.SHUT_WR)
+                            with HTTPResponse(client) as response:
+                                response.begin()
+                                self.assertEqual(response.status, 400)
+                                self.assertEqual(response.headers.get_content_type(), "application/json")
+                                raw = response.read()
+                                self.assertEqual(int(response.headers["Content-Length"]), len(raw))
+                                self.assertEqual(json.loads(raw), {"error": "incomplete request body"})
+                            self.assertEqual(client.recv(1), b"")
+                        analyze.assert_not_called()
+
+    def test_complete_request_bodies_preserve_keep_alive(self):
+        connection = HTTPConnection(*self.server.server_address, timeout=5)
+        self.addCleanup(connection.close)
+        connection.connect()
+        original_socket = connection.sock
+        for path, body, field in (
+            ("/assess", b"", "level"),
+            ("/assess", b'{"values":[0,0.0]}', "level"),
+            ("/spectrum", json.dumps({"device_id": "motor-01", "values": [0.0] * 1024}).encode(), "fault"),
+        ):
+            with self.subTest(path=path, body_length=len(body)):
+                connection.request("POST", path, body=body, headers={"Content-Type": "application/json"})
+                with connection.getresponse() as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertFalse(response.will_close)
+                    self.assertEqual(json.load(response)[field], "normal")
+                self.assertIs(connection.sock, original_socket)
+        connection.request("GET", "/health")
+        with connection.getresponse() as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.load(response), {"status": "ok"})
+        self.assertIs(connection.sock, original_socket)
 
     def test_post_rejects_invalid_content_length_headers(self):
         cases = [

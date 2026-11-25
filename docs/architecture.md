@@ -99,6 +99,8 @@ Python `/assess` 和 `/spectrum` 的 `values` 必须是数值数组，拒绝布�
 
 有限输入仍可能在均值、方差、RMS 或频谱能量计算中溢出。Python AI 在分级前拒绝无法得到有限结果的计算，返回含 `numeric range` 的 JSON 400，不把无效结果判为 `normal`；响应序列化禁止输出 `NaN` / `Infinity`。
 
+Python AI 在解析 JSON 和执行分析前核对实际收到的请求体长度；连接提前结束、字节数不足 `Content-Length` 时返回 JSON 400 并关闭连接，即使已收到的部分恰好是完整 JSON，也不予处理。显式零长度请求保留原有行为，长度正确的请求仍支持 HTTP keep-alive。
+
 # 验证
 
 Go：go test ./...（httpapi 4 个 + ingest 4 个）

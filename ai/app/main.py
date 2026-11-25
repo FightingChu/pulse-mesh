@@ -105,6 +105,10 @@ class H(BaseHTTPRequestHandler):
                 self._send({'error': 'request body too large'}, 413)
                 return
             raw = self.rfile.read(n)
+            if len(raw) != n:
+                self.close_connection = True
+                self._send({'error': 'incomplete request body'}, 400)
+                return
             text = (raw or b'{}').decode('utf-8')
             decoder = json.JSONDecoder(parse_constant=lambda value: (_ for _ in ()).throw(ValueError('invalid numeric constant: ' + value)))
             body, end = decoder.raw_decode(text.lstrip())
