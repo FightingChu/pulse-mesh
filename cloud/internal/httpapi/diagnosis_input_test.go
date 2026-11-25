@@ -128,3 +128,68 @@ func TestDiagnosisPreservesNumericWaveformAndDefaults(t *testing.T) {
 		})
 	}
 }
+
+func TestDiagnosisPreservesExplicitZeroRotation(t *testing.T) {
+	for _, scenario := range []struct {
+		name     string
+		rotation json.RawMessage
+		want     float64
+	}{
+		{"omitted", nil, 25},
+		{"null", json.RawMessage(`null`), 25},
+		{"zero", json.RawMessage(`0`), 0},
+		{"decimal zero", json.RawMessage(`0.0`), 0},
+		{"negative zero", json.RawMessage(`-0`), 0},
+		{"positive", json.RawMessage(`30`), 30},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var aiCalls atomic.Int32
+			ai := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				aiCalls.Add(1)
+				var actual diagnose.Request
+				if err := json.NewDecoder(request.Body).Decode(&actual); err != nil {
+					t.Errorf("decode forwarded request: %v", err)
+					writer.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if actual.RotationHz != scenario.want || actual.SampleRateHz != 1000 {
+					t.Errorf("forwarded rotation=%v rate=%v, want rotation=%v rate=1000", actual.RotationHz, actual.SampleRateHz, scenario.want)
+				}
+				fault := "normal"
+				if actual.RotationHz > 0 {
+					fault = "imbalance"
+				}
+				writeJSON(writer, diagnose.Result{DeviceID: actual.DeviceID, EventID: actual.EventID, Fault: fault})
+			}))
+			defer ai.Close()
+			store := diagnose.NewStore(10)
+			engine := alerts.New(time.Minute)
+			handler := httpapi.New(ingest.NewStore(), engine, diagnose.NewClient(ai.URL), store)
+			body := map[string]any{"device_id": "motor-01", "event_id": "zero-rotation", "values": make([]float64, 1024)}
+			if scenario.rotation != nil {
+				body["rotation_hz"] = scenario.rotation
+			}
+			payload, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/diagnose", bytes.NewReader(payload)))
+				if response.Code != http.StatusOK {
+					t.Fatalf("attempt %d: status=%d body=%s", attempt, response.Code, response.Body.String())
+				}
+			}
+			if aiCalls.Load() != 1 || store.Count() != 1 {
+				t.Fatalf("retry did not deduplicate: AI=%d diagnoses=%d", aiCalls.Load(), store.Count())
+			}
+			if scenario.want == 0 {
+				if store.List("motor-01", 1)[0].Fault != "normal" || len(engine.List("", true)) != 0 {
+					t.Error("substituting a non-zero rotation changed the diagnosis or raised an alert")
+				}
+			} else if len(engine.List("", true)) != 1 {
+				t.Error("positive rotation response should retain its alert behavior")
+			}
+		})
+	}
+}

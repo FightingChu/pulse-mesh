@@ -14,7 +14,8 @@ type diagnosisInput struct {
 func (input *diagnosisInput) UnmarshalJSON(data []byte) error {
 	var decoded struct {
 		diagnose.Request
-		Values []*float64 `json:"values"`
+		Values     []*float64 `json:"values"`
+		RotationHz *float64   `json:"rotation_hz"`
 	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
@@ -27,6 +28,10 @@ func (input *diagnosisInput) UnmarshalJSON(data []byte) error {
 		values[index] = *value
 	}
 	decoded.Request.Values = values
+	decoded.Request.RotationHz = 25
+	if decoded.RotationHz != nil {
+		decoded.Request.RotationHz = *decoded.RotationHz
+	}
 	input.Request = decoded.Request
 	return nil
 }

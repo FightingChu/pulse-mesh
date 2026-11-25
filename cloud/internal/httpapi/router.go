@@ -211,9 +211,6 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		if req.SampleRateHz == 0 {
 			req.SampleRateHz = 1000
 		}
-		if req.RotationHz == 0 {
-			req.RotationHz = 25
-		}
 		if req.SampleRateHz < 240 || req.RotationHz < 0 || req.SampleRateHz < 2*req.RotationHz {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sample_rate_hz must be at least 240 and satisfy the rotation Nyquist limit"})
 			return
