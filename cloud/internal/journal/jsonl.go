@@ -56,39 +56,43 @@ func RepairIncompleteTail(file *os.File) (bool, error) {
 		}
 		for i := length - 1; i >= 0; i-- {
 			if buffer[i] == '\n' {
-				truncateAt := start + int64(i) + 1
-				tailLength := size - truncateAt
-				if tailLength > 0 && tailLength <= maxJournalRecordBytes {
-					tail := make([]byte, int(tailLength))
-					if _, err := file.ReadAt(tail, truncateAt); err != nil && !errors.Is(err, io.EOF) {
-						return false, err
-					}
-					if json.Valid(bytes.TrimSpace(tail)) {
-						if _, err := file.Seek(0, io.SeekEnd); err != nil {
-							return false, err
-						}
-						if _, err := file.Write([]byte{'\n'}); err != nil {
-							return false, err
-						}
-						if err := file.Sync(); err != nil {
-							return false, err
-						}
-						return true, nil
-					}
-				}
-				if err := file.Truncate(truncateAt); err != nil {
-					return false, err
-				}
-				_, err := file.Seek(0, io.SeekEnd)
-				return true, err
+				return repairTailRecord(file, start+int64(i)+1, size)
 			}
 		}
 		end = start
 	}
-	if err := file.Truncate(0); err != nil {
+	return repairTailRecord(file, 0, size)
+}
+
+func repairTailRecord(file *os.File, start, size int64) (bool, error) {
+	tailLength := size - start
+	if tailLength > 0 && tailLength <= maxJournalRecordBytes {
+		tail := make([]byte, int(tailLength))
+		if _, err := file.ReadAt(tail, start); err != nil {
+			return false, err
+		}
+		if json.Valid(bytes.TrimSpace(tail)) {
+			if _, err := file.Seek(0, io.SeekEnd); err != nil {
+				return false, err
+			}
+			if written, err := file.Write([]byte{'\n'}); err != nil {
+				return false, err
+			} else if written != 1 {
+				return false, io.ErrShortWrite
+			}
+			if err := file.Sync(); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	if err := file.Truncate(start); err != nil {
 		return false, err
 	}
-	_, err = file.Seek(0, io.SeekEnd)
+	if err := file.Sync(); err != nil {
+		return false, err
+	}
+	_, err := file.Seek(0, io.SeekEnd)
 	return true, err
 }
 
