@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -86,12 +87,17 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				"alert":  created,
 			})
 		case http.MethodGet:
-			limit, err := queryLimit(r, 100)
+			query, err := url.ParseQuery(r.URL.RawQuery)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid query encoding"})
+				return
+			}
+			limit, err := queryLimit(query, 100)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
-			writeJSON(w, http.StatusOK, store.List(r.URL.Query().Get("device"), limit))
+			writeJSON(w, http.StatusOK, store.List(query.Get("device"), limit))
 		default:
 			w.Header().Set("Allow", "GET, POST")
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -153,8 +159,13 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		includeAcked := r.URL.Query().Get("include_acked") == "1"
-		writeJSON(w, http.StatusOK, engine.List(r.URL.Query().Get("device"), includeAcked))
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid query encoding"})
+			return
+		}
+		includeAcked := query.Get("include_acked") == "1"
+		writeJSON(w, http.StatusOK, engine.List(query.Get("device"), includeAcked))
 	})
 
 	mux.HandleFunc("/api/v1/alerts/", func(w http.ResponseWriter, r *http.Request) {
@@ -296,12 +307,17 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		limit, err := queryLimit(r, 100)
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid query encoding"})
+			return
+		}
+		limit, err := queryLimit(query, 100)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, diagnoses.List(r.URL.Query().Get("device"), limit))
+		writeJSON(w, http.StatusOK, diagnoses.List(query.Get("device"), limit))
 	})
 
 	return withLogging(metrics, withCORS(withRecovery(mux)))
@@ -394,8 +410,8 @@ func processSamples(store *ingest.Store, engine *alerts.Engine, samples []ingest
 	return added, created, nil
 }
 
-func queryLimit(r *http.Request, defaultLimit int) (int, error) {
-	raw := r.URL.Query().Get("limit")
+func queryLimit(query url.Values, defaultLimit int) (int, error) {
+	raw := query.Get("limit")
 	if raw == "" {
 		return defaultLimit, nil
 	}
