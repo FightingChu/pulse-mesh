@@ -24,6 +24,8 @@ Hann 窗相干增益为 0.5，峰值幅度按 4/N 归一化补偿。
 云端收到 warning / critical 样本时生成告警，按 device_id + metric + level 在 5 分钟窗口内去重。
 GET /api/v1/alerts?device=motor-01&include_acked=1 查询，POST /api/v1/alerts/{id}/ack 确认。
 
+告警列表返回独立快照，包含确认时间 `acked_at` 的副本；调用方修改快照不会改变引擎内的确认记录或其他快照，内存模式和日志恢复后行为一致。
+
 # 诊断链路
 
 网关（Rust）先按 1 kHz 采 1024 点波形，发到云端 POST /api/v1/diagnose，云端转发给 AI 的 POST /spectrum，

@@ -470,6 +470,10 @@ func (e *Engine) List(device string, includeAcked bool) []Alert {
 		if !includeAcked && a.Acked {
 			continue
 		}
+		if a.AckedAt != nil {
+			ackedAt := *a.AckedAt
+			a.AckedAt = &ackedAt
+		}
 		out = append(out, a)
 	}
 	return out
