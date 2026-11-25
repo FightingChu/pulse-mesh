@@ -86,6 +86,29 @@ int main() {
   const double constant[] = {3.0, 3.0, 3.0, 3.0};
   expect_near("rms constant", compute_rms(constant, 4), 3.0, 1e-9);
   expect_near("rms empty", compute_rms(nullptr, 0), 0.0, 1e-9);
+  for (double magnitude : {1e308, std::numeric_limits<double>::max(), 1e-300,
+                           std::numeric_limits<double>::denorm_min()}) {
+    const double extreme[] = {magnitude, -magnitude, magnitude, -magnitude};
+    const double actual = compute_rms(extreme, 4);
+    if (!std::isfinite(actual) || actual <= 0.0) {
+      std::printf("FAIL rms finite nonzero range: input %.17g result %.17g\n", magnitude, actual);
+      failures++;
+    } else {
+      expect_near("rms scaled constant", actual / magnitude, 1.0, 1e-12);
+    }
+  }
+  const double mixed[] = {0.0, 1e308, 0.0, -1e308};
+  expect_near("rms mixed large values", compute_rms(mixed, 4) / 1e308,
+              std::sqrt(0.5), 1e-12);
+  const double zeros[] = {0.0, -0.0, 0.0, -0.0};
+  expect_near("rms zeros", compute_rms(zeros, 4), 0.0, 0.0);
+  for (double invalid_value : {NAN, INFINITY, -INFINITY}) {
+    const double invalid_rms_input[] = {1.0, invalid_value};
+    if (std::isfinite(compute_rms(invalid_rms_input, 2))) {
+      std::printf("FAIL rms invalid input became finite\n");
+      failures++;
+    }
+  }
 
   std::vector<double> sine(1024);
   for (std::size_t i = 0; i < sine.size(); i++) {

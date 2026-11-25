@@ -130,9 +130,19 @@ void fft_radix2_impl(float* re, float* im, std::size_t n, float* twiddle_real,
 
 double compute_rms(const double* v, std::size_t n) {
   if (n == 0) return 0.0;
-  double s = 0.0;
-  for (std::size_t i = 0; i < n; i++) s += v[i] * v[i];
-  return std::sqrt(s / (double)n);
+  double scale = 0.0;
+  for (std::size_t index = 0; index < n; index++) {
+    if (!std::isfinite(v[index])) return std::numeric_limits<double>::quiet_NaN();
+    const double magnitude = std::fabs(v[index]);
+    if (magnitude > scale) scale = magnitude;
+  }
+  if (scale == 0.0) return 0.0;
+  double sum = 0.0;
+  for (std::size_t index = 0; index < n; index++) {
+    const double normalized = v[index] / scale;
+    sum += normalized * normalized;
+  }
+  return scale * std::sqrt(sum / (double)n);
 }
 int classify(double rms) {
   if (rms > 4.0) return 2;
