@@ -35,7 +35,7 @@ type Alert struct {
 type Engine struct {
 	mu           sync.Mutex
 	items        []Alert
-	seen         map[string]time.Time
+	seen         map[windowKey]time.Time
 	eventSeen    map[[sha256.Size]byte]struct{}
 	window       time.Duration
 	seq          int
@@ -45,12 +45,18 @@ type Engine struct {
 	closed       bool
 }
 
+type windowKey struct {
+	deviceID string
+	metric   string
+	level    string
+}
+
 func New(window time.Duration) *Engine {
 	if window <= 0 {
 		window = 5 * time.Minute
 	}
 	return &Engine{
-		seen:      make(map[string]time.Time),
+		seen:      make(map[windowKey]time.Time),
 		eventSeen: make(map[[sha256.Size]byte]struct{}),
 		window:    window,
 		maxKeep:   1000,
@@ -110,7 +116,8 @@ func (e *Engine) load(file *os.File) error {
 				return fmt.Errorf("alert create record has no alert")
 			}
 			if record.SeenKey != "" && record.SeenAt != nil {
-				e.seen[record.SeenKey] = *record.SeenAt
+				key := windowKey{record.Alert.DeviceID, record.Alert.Metric, record.Alert.Level}
+				e.seen[key] = *record.SeenAt
 			}
 			if record.EventKey != "" {
 				e.eventSeen[decodeEventKey(record.EventKey)] = struct{}{}
@@ -148,7 +155,7 @@ func (e *Engine) addMemory(alert Alert) {
 	}
 	if len(e.items) > e.maxKeep {
 		removed := e.items[0]
-		key := removed.DeviceID + "|" + removed.Metric + "|" + removed.Level
+		key := windowKey{removed.DeviceID, removed.Metric, removed.Level}
 		if seenAt, ok := e.seen[key]; ok && seenAt.Equal(removed.CreatedAt) {
 			delete(e.seen, key)
 		}
@@ -198,7 +205,7 @@ func (e *Engine) EvaluateBatchWithError(samples []ingest.Sample) ([]Alert, error
 
 	now := time.Now().UTC()
 	seenEvents := make(map[[sha256.Size]byte]struct{}, len(samples))
-	seenWindow := make(map[string]time.Time)
+	seenWindow := make(map[windowKey]time.Time)
 	newEvents := make(map[[sha256.Size]byte]struct{})
 	records := make([]journalRecord, 0, len(samples))
 	alerts := make([]Alert, 0, len(samples))
@@ -231,7 +238,7 @@ func (e *Engine) EvaluateFaultEventBatchWithError(deviceID string, events []Faul
 
 	now := time.Now().UTC()
 	seenEvents := make(map[[sha256.Size]byte]struct{}, len(events))
-	seenWindow := make(map[string]time.Time)
+	seenWindow := make(map[windowKey]time.Time)
 	newEvents := make(map[[sha256.Size]byte]struct{})
 	records := make([]journalRecord, 0, len(events))
 	alerts := make([]Alert, 0, len(events))
@@ -290,10 +297,10 @@ func decodeEventKey(key string) [sha256.Size]byte {
 }
 
 func (e *Engine) planAlert(eventID, deviceID, metric, level string, value float64, message string, now time.Time,
-	seenEvents map[[sha256.Size]byte]struct{}, seenWindow map[string]time.Time,
+	seenEvents map[[sha256.Size]byte]struct{}, seenWindow map[windowKey]time.Time,
 	newEvents map[[sha256.Size]byte]struct{},
 	records *[]journalRecord, alerts *[]Alert) error {
-	key := deviceID + "|" + metric + "|" + level
+	key := windowKey{deviceID, metric, level}
 	eventKey := ""
 	var eventKeyBytes [sha256.Size]byte
 	if eventID != "" {
@@ -329,7 +336,7 @@ func (e *Engine) planAlert(eventID, deviceID, metric, level string, value float6
 		Message:   message,
 		CreatedAt: now,
 	}
-	*records = append(*records, journalRecord{Type: "create", Alert: &alert, SeenKey: key, EventKey: eventKey, SeenAt: &now})
+	*records = append(*records, journalRecord{Type: "create", Alert: &alert, SeenKey: deviceID + "|" + metric + "|" + level, EventKey: eventKey, SeenAt: &now})
 	seenWindow[key] = now
 	if eventID != "" {
 		seenEvents[eventKeyBytes] = struct{}{}
@@ -361,7 +368,7 @@ func (e *Engine) appendRecords(records []journalRecord) error {
 	return nil
 }
 
-func (e *Engine) commitPlanned(records []journalRecord, seenWindow map[string]time.Time, newEvents map[[sha256.Size]byte]struct{}) {
+func (e *Engine) commitPlanned(records []journalRecord, seenWindow map[windowKey]time.Time, newEvents map[[sha256.Size]byte]struct{}) {
 	for key, at := range seenWindow {
 		e.seen[key] = at
 	}
@@ -403,7 +410,7 @@ func (e *Engine) EvaluateFaultEventWithError(deviceID, eventID, fault string) (*
 }
 
 func (e *Engine) raise(eventID, deviceID, metric, level string, value float64, message string) (*Alert, error) {
-	key := deviceID + "|" + metric + "|" + level
+	key := windowKey{deviceID, metric, level}
 	var eventKey [sha256.Size]byte
 	eventKeyString := ""
 	if eventID != "" {
@@ -446,7 +453,7 @@ func (e *Engine) raise(eventID, deviceID, metric, level string, value float64, m
 		Message:   message,
 		CreatedAt: now,
 	}
-	if err := e.appendRecord(journalRecord{Type: "create", Alert: &alert, SeenKey: key, EventKey: eventKeyString, SeenAt: &now}); err != nil {
+	if err := e.appendRecord(journalRecord{Type: "create", Alert: &alert, SeenKey: deviceID + "|" + metric + "|" + level, EventKey: eventKeyString, SeenAt: &now}); err != nil {
 		return nil, err
 	}
 	e.seq++

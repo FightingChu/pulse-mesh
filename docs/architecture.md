@@ -24,6 +24,8 @@ Hann 窗相干增益为 0.5，峰值幅度按 4/N 归一化补偿。
 云端收到 warning / critical 样本时生成告警，按 device_id + metric + level 在 5 分钟窗口内去重。
 GET /api/v1/alerts?device=motor-01&include_acked=1 查询，POST /api/v1/alerts/{id}/ack 确认。
 
+窗口去重在内存中使用独立的设备、指标、等级字段，不通过分隔符拼接；合法标识符中的 `|` 不会令不同告警互相抑制。现有 JSONL 格式保持不变，启动时从告警原始字段恢复窗口索引，兼容旧 `seen_key` 记录。
+
 告警列表返回独立快照，包含确认时间 `acked_at` 的副本；调用方修改快照不会改变引擎内的确认记录或其他快照，内存模式和日志恢复后行为一致。
 
 # 诊断链路
