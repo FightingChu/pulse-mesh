@@ -59,6 +59,18 @@ class AssessTest(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         main.diagnose("motor-01", [0.0] * 1024, **{field: invalid})
 
+    def test_assess_rejects_numeric_overflow(self):
+        for values in ([1e308] * 6, [1e200, -1e200] * 3, [1e308], [0.0, 0.0, 0.0, 1e308]):
+            with self.subTest(values=values):
+                with self.assertRaisesRegex(ValueError, "numeric range"):
+                    main.assess("motor-01", "vibration_rms", values)
+
+    def test_assess_preserves_large_representable_results(self):
+        result = main.assess("motor-01", "vibration_rms", [1e100] * 6)
+        self.assertEqual(result["level"], "normal")
+        self.assertEqual(result["z"], 0)
+        self.assertAlmostEqual(result["rms"] / 1e100, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -311,6 +311,36 @@ class HTTPTest(unittest.TestCase):
         self.assertEqual(payload["level"], "normal")
         self.assertEqual(payload["rms"], 0.0)
 
+    def test_post_numeric_overflow_returns_json_error(self):
+        cases = (
+            ("/assess", [1e308] * 6),
+            ("/assess", [1e200, -1e200] * 3),
+            ("/assess", [1e308]),
+            ("/spectrum", [1e308] * 1024),
+            ("/spectrum", [1e200 * math.sin(2 * math.pi * 120 * index / 1000) for index in range(1024)]),
+        )
+        for index, (path, values) in enumerate(cases):
+            with self.subTest(path=path, case=index):
+                req = urllib.request.Request(
+                    self.base + path,
+                    data=json.dumps({"device_id": "motor-01", "values": values}, allow_nan=False).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(req, timeout=5).close()
+                self.assertEqual(ctx.exception.code, 400)
+                with ctx.exception as response:
+                    self.assertEqual(response.headers.get_content_type(), "application/json")
+                    raw = response.read()
+                    self.assertEqual(int(response.headers["Content-Length"]), len(raw))
+                    payload = json.loads(raw)
+                    self.assertIn("numeric range", payload["error"])
+                    self.assertNotIn("level", payload)
+                    self.assertNotIn("fault", payload)
+                    json.dumps(payload, allow_nan=False)
+        with urllib.request.urlopen(self.base + "/health", timeout=5) as response:
+            self.assertEqual(response.status, 200)
+
     def test_post_rejects_invalid_sample_types(self):
         invalid_values = [None, False, 0, "", {}, {"0": 0}]
         invalid_values.extend(

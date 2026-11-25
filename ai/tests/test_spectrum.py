@@ -49,6 +49,24 @@ class SpectrumTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             spectrum.analyze(tone(25.0), 0)
 
+    def test_rejects_numeric_overflow_before_classification(self):
+        for name, values in (
+            ("mean", [1e308] * N),
+            ("power", tone(120.0, 1e200)),
+            ("energy_sum", [2.5e151, -2.5e151] * (N // 2)),
+        ):
+            with self.subTest(stage=name):
+                with self.assertRaisesRegex(ValueError, "numeric range"):
+                    spectrum.diagnose(values, RATE, 25.0)
+
+    def test_large_representable_tone_preserves_features(self):
+        reference = spectrum.diagnose(tone(120.0), RATE, 25.0)
+        result = spectrum.diagnose(tone(120.0, 1e100), RATE, 25.0)
+        self.assertEqual(result["fault"], reference["fault"])
+        for feature in ("dominant_hz", "low_band", "mid_band", "high_band"):
+            self.assertEqual(result[feature], reference[feature])
+        self.assertAlmostEqual(result["peak_amplitude"] / 1e100, reference["peak_amplitude"], places=4)
+
 
 if __name__ == "__main__":
     unittest.main()

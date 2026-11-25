@@ -48,8 +48,14 @@ def assess(device_id, metric, values):
     if not isinstance(values, list) or len(values) > 10000 or any(not is_finite_number(value) for value in values):
         raise ValueError('values must be an array of at most 10000 finite numbers')
     last = values[-1] if values else 0.0
-    z = zscore(last, baseline(values))
-    return {'device_id': device_id, 'metric': metric, 'last': last, 'rms': rms(values), 'z': round(z, 3), 'level': level_of(z)}
+    try:
+        z = zscore(last, baseline(values))
+        rms_value = rms(values)
+    except OverflowError as exc:
+        raise ValueError('assessment exceeds numeric range') from exc
+    if not math.isfinite(z) or not math.isfinite(rms_value):
+        raise ValueError('assessment exceeds numeric range')
+    return {'device_id': device_id, 'metric': metric, 'last': last, 'rms': rms_value, 'z': round(z, 3), 'level': level_of(z)}
 
 def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0, event_id=''):
     if not isinstance(device_id, str) or not device_id or len(device_id) > 64:
@@ -124,7 +130,7 @@ class H(BaseHTTPRequestHandler):
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             self._send({'error': str(exc)}, 400)
     def _send(self, obj, status=200):
-        data = json.dumps(obj).encode()
+        data = json.dumps(obj, allow_nan=False).encode()
         self.send_response(status); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
     def log_message(self, *a):
         if os.environ.get('PULSE_ACCESS_LOG', '1') == '0':

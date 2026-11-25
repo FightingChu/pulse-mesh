@@ -97,6 +97,8 @@ AI 响应必须显式提供数值 `dominant_hz`、`peak_amplitude`、`low_band`�
 
 Python `/assess` 和 `/spectrum` 的 `values` 必须是数值数组，拒绝布尔、字符串、`null`、嵌套对象和无法表示为有限浮点数的超大整数，返回 JSON 400。频率参数同样只接受有限数值，不再把字符串或布尔值强制转成浮点数；省略时保留默认值，显式数值零仍按各字段的原有范围规则处理。
 
+有限输入仍可能在均值、方差、RMS 或频谱能量计算中溢出。Python AI 在分级前拒绝无法得到有限结果的计算，返回含 `numeric range` 的 JSON 400，不把无效结果判为 `normal`；响应序列化禁止输出 `NaN` / `Infinity`。
+
 # 验证
 
 Go：go test ./...（httpapi 4 个 + ingest 4 个）

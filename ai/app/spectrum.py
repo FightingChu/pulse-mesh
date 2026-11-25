@@ -52,6 +52,8 @@ def analyze(values, sample_rate_hz):
         raise ValueError("sample_rate_hz must be positive")
 
     mean = sum(values) / n
+    if not math.isfinite(mean):
+        raise ValueError("spectrum exceeds numeric range")
     window = hann(n)
     prepared = [(values[i] - mean) * window[i] for i in range(n)]
     spectrum = fft(prepared)
@@ -61,10 +63,15 @@ def analyze(values, sample_rate_hz):
     total = 0.0
     peak_bin = 1
     for k in range(1, half + 1):
-        power[k] = abs(spectrum[k]) ** 2
+        try:
+            power[k] = abs(spectrum[k]) ** 2
+        except OverflowError as exc:
+            raise ValueError("spectrum exceeds numeric range") from exc
         total += power[k]
         if power[k] > power[peak_bin]:
             peak_bin = k
+    if not math.isfinite(total):
+        raise ValueError("spectrum exceeds numeric range")
     if total <= 0.0:
         return {
             "dominant_hz": 0.0,
