@@ -58,11 +58,12 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 	mux.HandleFunc("/api/v1/samples", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
-			var s ingest.Sample
-			if err := decodeJSON(w, r, &s); err != nil {
+			var input sampleInput
+			if err := decodeJSON(w, r, &input); err != nil {
 				writeDecodeError(w, err)
 				return
 			}
+			s := input.Sample
 			if err := validateSample(s); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
@@ -103,20 +104,22 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		var samples []ingest.Sample
-		if err := decodeJSON(w, r, &samples); err != nil {
+		var inputs []sampleInput
+		if err := decodeJSON(w, r, &inputs); err != nil {
 			writeDecodeError(w, err)
 			return
 		}
-		if len(samples) == 0 || len(samples) > maxSampleBatch {
+		if len(inputs) == 0 || len(inputs) > maxSampleBatch {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "batch must contain between 1 and 100 samples"})
 			return
 		}
-		for index, sample := range samples {
-			if err := validateSample(sample); err != nil {
+		samples := make([]ingest.Sample, len(inputs))
+		for index, input := range inputs {
+			if err := validateSample(input.Sample); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "index": index})
 				return
 			}
+			samples[index] = input.Sample
 		}
 		addedItems, batchAlerts, err := processSamples(store, engine, samples)
 		if err != nil {

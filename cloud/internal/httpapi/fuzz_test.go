@@ -31,6 +31,9 @@ func FuzzValidateSample(f *testing.F) {
 
 func FuzzDecodeJSON(f *testing.F) {
 	f.Add(`{"device_id":"motor-01","metric":"vibration_rms","value":1.2}`)
+	f.Add(`{"device_id":"motor-01","metric":"vibration_rms"}`)
+	f.Add(`{"device_id":"motor-01","metric":"vibration_rms","value":null}`)
+	f.Add(`{"device_id":"motor-01","metric":"vibration_rms","value":0}`)
 	f.Add(`[]`)
 	f.Add(`{"x":1} {"y":2}`)
 	f.Add(`{"value":NaN}`)
@@ -39,9 +42,9 @@ func FuzzDecodeJSON(f *testing.F) {
 	f.Fuzz(func(t *testing.T, body string) {
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/samples", bytes.NewBufferString(body))
 		recorder := httptest.NewRecorder()
-		var sample ingest.Sample
-		if err := decodeJSON(recorder, request, &sample); err == nil {
-			_ = validateSample(sample)
+		var input sampleInput
+		if err := decodeJSON(recorder, request, &input); err == nil {
+			_ = validateSample(input.Sample)
 		}
 	})
 }

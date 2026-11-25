@@ -89,6 +89,8 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 字段固定：device_id / metric / value 必填，level 取 normal|warning|critical，
 temp_c 可选，ts 缺失时由云端补 UTC 时间。
 
+单条和批量样本入口要求显式提供数值 `value`；缺失、`null`、布尔或字符串均返回 400，数值 `0` 合法。批量请求会在全部输入解码与校验通过后才写样本和告警，避免无效项被悄悄转换成零值。
+
 # 验证
 
 Go：go test ./...（httpapi 4 个 + ingest 4 个）
