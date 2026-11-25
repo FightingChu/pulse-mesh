@@ -88,6 +88,24 @@ class OverloadStreamTest(unittest.TestCase):
         self.assertEqual(client.response, b'')
         self.assertEqual(client.chunks, [b'\r\n\r\n'])
 
+    def test_overload_rejects_non_decimal_content_length_without_reading_body(self):
+        for length in (b'+2', b'0_2', b'-0', b'-2', b'', b'2,2', b'\xa02', b'2\xa0', b'\x0b2', b'2\x0b'):
+            with self.subTest(length=length):
+                header = b'POST /assess HTTP/1.1\r\nContent-Length: ' + length + b'\r\n\r\n'
+                client = self.reject([header, b'{}'])
+                self.assertFalse(client.read_past_body)
+                self.assertEqual(client.response, b'')
+                self.assertEqual(client.chunks, [b'{}'])
+
+    def test_overload_accepts_decimal_content_length_with_http_whitespace(self):
+        for length in (b'2', b'02', b' \t2\t '):
+            with self.subTest(length=length):
+                header = b'POST /assess HTTP/1.1\r\nContent-Length: ' + length + b'\r\n\r\n'
+                client = self.reject([header, b'{}'])
+                self.assertFalse(client.read_past_body)
+                self.assertEqual(client.chunks, [])
+                self.assertTrue(client.response.startswith(b'HTTP/1.1 503 '))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -75,6 +75,12 @@ def diagnose(device_id, values, sample_rate_hz=1000.0, rotation_hz=25.0, event_i
     result['event_id'] = event_id
     return result
 
+def _parse_content_length(value):
+    value = value.strip(' \t')
+    if not value.isascii() or not value.isdecimal():
+        raise ValueError('invalid content-length')
+    return int(value)
+
 class H(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
@@ -95,12 +101,12 @@ class H(BaseHTTPRequestHandler):
                 self._send({'error': 'exactly one content-length header is required'}, 411)
                 return
             try:
-                n = int(content_lengths[0])
+                n = _parse_content_length(content_lengths[0])
             except ValueError:
                 self.close_connection = True
                 self._send({'error': 'invalid content-length'}, 400)
                 return
-            if n < 0 or n > MAX_BODY_BYTES:
+            if n > MAX_BODY_BYTES:
                 self.close_connection = True
                 self._send({'error': 'request body too large'}, 413)
                 return
@@ -279,10 +285,10 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             name, separator, value = line.partition(b':')
             if separator and name.strip().lower() == b'content-length':
                 try:
-                    length = int(value.strip())
+                    length = _parse_content_length(value.decode('latin-1'))
                 except ValueError:
                     return None
-                return length if length >= 0 else None
+                return length
         return 0
 
 if __name__ == '__main__':

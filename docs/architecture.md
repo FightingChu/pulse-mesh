@@ -101,6 +101,8 @@ Python `/assess` 和 `/spectrum` 的 `values` 必须是数值数组，拒绝布�
 
 Python AI 在解析 JSON 和执行分析前核对实际收到的请求体长度；连接提前结束、字节数不足 `Content-Length` 时返回 JSON 400 并关闭连接，即使已收到的部分恰好是完整 JSON，也不予处理。显式零长度请求保留原有行为，长度正确的请求仍支持 HTTP keep-alive。
 
+正常和过载处理共用 `Content-Length` 数值解析：仅接受 ASCII 十进制数字和两端的 HTTP 空格 / 制表符，允许前导零，拒绝正负号、下划线及其他空白。正常路径对非法格式返回 JSON 400；过载路径不再按非法长度继续读取正文，直接关闭连接。
+
 # 验证
 
 Go：go test ./...（httpapi 4 个 + ingest 4 个）

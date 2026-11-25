@@ -573,6 +573,34 @@ class HTTPTest(unittest.TestCase):
                     response = client.recv(1024)
                 self.assertIn(expected_status, response)
 
+    def test_post_rejects_non_decimal_content_length(self):
+        for length in (b"+2", b"0_2", b"-0", b"-2", b"", b"2,2", b"\xa02", b"2\xa0", b"\x0b2", b"2\x0b"):
+            with self.subTest(length=length):
+                with patch.object(main, "assess", wraps=main.assess) as analyze:
+                    with socket.create_connection(self.server.server_address, timeout=5) as client:
+                        client.sendall(
+                            b"POST /assess HTTP/1.1\r\nHost: localhost\r\nContent-Length: "
+                            + length + b"\r\nConnection: close\r\n\r\n{}"
+                        )
+                        with HTTPResponse(client) as response:
+                            response.begin()
+                            self.assertEqual(response.status, 400)
+                            self.assertEqual(json.load(response), {"error": "invalid content-length"})
+                    analyze.assert_not_called()
+
+    def test_post_accepts_decimal_content_length_with_http_whitespace(self):
+        for length in (b"2", b"02", b" \t2\t "):
+            with self.subTest(length=length):
+                with socket.create_connection(self.server.server_address, timeout=5) as client:
+                    client.sendall(
+                        b"POST /assess HTTP/1.1\r\nHost: localhost\r\nContent-Length: "
+                        + length + b"\r\nConnection: close\r\n\r\n{}"
+                    )
+                    with HTTPResponse(client) as response:
+                        response.begin()
+                        self.assertEqual(response.status, 200)
+                        self.assertEqual(json.load(response)["level"], "normal")
+
 
 if __name__ == "__main__":
     unittest.main()
