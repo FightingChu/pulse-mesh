@@ -1,4 +1,5 @@
 import json, math, os, sys, time
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -173,6 +174,13 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             raise ValueError('max_workers must be an integer between 1 and 64')
         if isinstance(max_rejection_workers, bool) or not isinstance(max_rejection_workers, int) or not 1 <= max_rejection_workers <= self.request_queue_size:
             raise ValueError('max_rejection_workers must be an integer between 1 and 16')
+        if not is_finite_number(request_timeout) or not 0 < request_timeout <= threading.TIMEOUT_MAX - 1:
+            raise ValueError('request_timeout must be positive, finite and within the thread timeout limit')
+        with socket.socket() as probe:
+            try:
+                probe.settimeout(request_timeout)
+            except (ValueError, OverflowError) as exc:
+                raise ValueError('request_timeout exceeds the platform socket limit') from exc
         self._worker_slots = threading.BoundedSemaphore(max_workers)
         self._rejection_slots = threading.BoundedSemaphore(max_rejection_workers)
         self._rejection_threads = set()
