@@ -206,11 +206,16 @@ Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_ra
     mean += (samples[i] - mean) / (double)(i + 1);
   }
   const double float_limit = (double)std::numeric_limits<float>::max();
-  for (std::size_t i = 0; i < n; i++) {
-    const double centered = samples[i] - mean;
+  double scale = 0.0;
+  for (std::size_t index = 0; index < n; index++) {
+    const double centered = samples[index] - mean;
     if (!std::isfinite(centered) || std::fabs(centered) > float_limit) return out;
-    workspace.real[i] = (float)centered;
-    workspace.imaginary[i] = 0.0f;
+    if (std::fabs(centered) > scale) scale = std::fabs(centered);
+  }
+  if (scale == 0.0) return out;
+  for (std::size_t index = 0; index < n; index++) {
+    workspace.real[index] = (float)((samples[index] - mean) / scale);
+    workspace.imaginary[index] = 0.0f;
   }
 
   hann_window(workspace.real.data(), n);
@@ -235,7 +240,7 @@ Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_ra
   const double bin_hz = sample_rate_hz / (double)n;
   out.dominant_hz = (double)peak_bin * bin_hz;
   // Hann window has a coherent gain of 0.5, so compensate by 2x.
-  out.peak_amplitude = std::sqrt(peak_power) * 4.0 / (double)n;
+  out.peak_amplitude = (std::sqrt(peak_power) * 4.0 / (double)n) * scale;
 
   double low = 0.0;
   double mid = 0.0;

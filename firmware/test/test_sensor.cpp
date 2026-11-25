@@ -149,6 +149,40 @@ int main() {
   expect_near("dominant 120hz", s3.dominant_hz, 120.0, 2.0);
   expect_str("bearing wear", classify_fault(s3, 25.0), "bearing_wear");
 
+  for (double amplitude : {1e37, 1e-50}) {
+    std::vector<double> scaled_bearing(bearing.size());
+    for (std::size_t index = 0; index < bearing.size(); index++) {
+      scaled_bearing[index] = amplitude * bearing[index];
+    }
+    for (bool reuse_workspace : {false, true}) {
+      const Spectrum scaled = reuse_workspace
+          ? analyze_spectrum(scaled_bearing.data(), scaled_bearing.size(), 1000.0, workspace)
+          : analyze_spectrum(scaled_bearing.data(), scaled_bearing.size(), 1000.0);
+      if (!std::isfinite(scaled.dominant_hz) || !std::isfinite(scaled.peak_amplitude) ||
+          !std::isfinite(scaled.low_band) || !std::isfinite(scaled.mid_band) ||
+          !std::isfinite(scaled.high_band) || scaled.peak_amplitude <= 0.0) {
+        std::printf("FAIL scaled spectrum finite nonzero output: amplitude %.17g peak %.17g\n",
+                    amplitude, scaled.peak_amplitude);
+        failures++;
+        continue;
+      }
+      expect_near("scaled spectrum frequency", scaled.dominant_hz, s3.dominant_hz, 1e-6);
+      expect_near("scaled spectrum amplitude", scaled.peak_amplitude / amplitude,
+                  s3.peak_amplitude, 1e-5);
+      expect_near("scaled spectrum low band", scaled.low_band, s3.low_band, 1e-5);
+      expect_near("scaled spectrum mid band", scaled.mid_band, s3.mid_band, 1e-5);
+      expect_near("scaled spectrum high band", scaled.high_band, s3.high_band, 1e-5);
+      expect_str("scaled spectrum bearing wear", classify_fault(scaled, 25.0), "bearing_wear");
+    }
+  }
+  const Spectrum after_scaled = analyze_spectrum(sine.data(), sine.size(), 1000.0, workspace);
+  expect_near("workspace reuse after scaled signal", after_scaled.peak_amplitude,
+              s.peak_amplitude, 1e-5);
+  const Spectrum constant_spectrum = analyze_spectrum(constant, 4, 1000.0, workspace);
+  expect_near("constant spectrum amplitude", constant_spectrum.peak_amplitude, 0.0, 0.0);
+  expect_near("constant spectrum frequency", constant_spectrum.dominant_hz, 0.0, 0.0);
+  expect_str("constant spectrum verdict", classify_fault(constant_spectrum, 25.0), "normal");
+
   Spectrum empty{};
   expect_str("flat spectrum normal", classify_fault(empty, 25.0), "normal");
 
