@@ -50,6 +50,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - Go 和 Python API 限制 JSON body 为 128 KiB；诊断固定 1024 点，拒绝 NaN/Infinity、无效采样率和多段 JSON。
 - Prometheus 路由标签限制为已知路由，其他路径合并为 unmatched，避免路径注入造成高基数。
 - Rust outbox 限制 64 MiB、单条 128 KiB；追加后 sync_data，重放保留原始路由，只收到 2xx 后才确认移除。
+- 同进程的 outbox 读写共用互斥锁；重放期间不持有锁，收到整份快照的 2xx 确认后，只有文件内容仍等于快照才删除。若同时追加了新记录，则保留整份缓存并在下次幂等重放；多个网关进程不得共用同一缓存路径。
 - Rust HTTP 客户端设置 5s 读写超时，只接受 2xx 作为成功；未知路由在连接前拒绝。
 - 网关事件带 event_id，样本、诊断和由其触发的告警以 device_id + event_id 幂等；同一事件即使超过告警时间去重窗口或服务重启，也不会重复生成告警。
 - 永久告警事件索引以 device_id + event_id 的 SHA-256 定长摘要保存，旧 JSONL 明文键启动时兼容迁移到摘要。

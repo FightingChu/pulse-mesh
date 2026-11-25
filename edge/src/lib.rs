@@ -297,6 +297,9 @@ pub fn append_cache_to(path: &Path, route: &str, body: &str) -> io::Result<()> {
 }
 
 pub fn read_cache(path: &Path) -> io::Result<Vec<String>> {
+    let _guard = OUTBOX_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("offline cache lock poisoned"))?;
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -305,13 +308,18 @@ pub fn read_cache(path: &Path) -> io::Result<Vec<String>> {
 }
 
 pub fn flush_cache(addr: &str, path: &Path) -> usize {
-    let pending = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(_) => return 0,
+    let pending = {
+        let Ok(_guard) = OUTBOX_LOCK.lock() else {
+            return 0;
+        };
+        match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(_) => return 0,
+        }
     };
     let lines: Vec<&str> = pending.lines().collect();
     if lines.is_empty() {
-        let _ = fs::remove_file(path);
+        remove_unchanged_cache(path, &pending);
         return 0;
     }
     let mut sent = 0;
@@ -328,12 +336,20 @@ pub fn flush_cache(addr: &str, path: &Path) -> usize {
         sent += 1;
     }
     if sent == lines.len() && sent > 0 {
-        let completed = path.with_extension("jsonl.sent");
-        if fs::rename(path, &completed).is_ok() {
-            let _ = fs::remove_file(completed);
-        }
+        remove_unchanged_cache(path, &pending);
     }
     sent
+}
+
+fn remove_unchanged_cache(path: &Path, snapshot: &str) {
+    let Ok(_guard) = OUTBOX_LOCK.lock() else {
+        return;
+    };
+    if let Ok(current) = fs::read_to_string(path) {
+        if current == snapshot {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 #[cfg(test)]
