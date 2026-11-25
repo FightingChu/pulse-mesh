@@ -181,6 +181,9 @@ fn read_http_success(stream: &mut TcpStream) -> bool {
             Err(_) => return false,
         }
     }
+    if !response.windows(4).any(|window| window == b"\r\n\r\n") {
+        return false;
+    }
     let Some(line_end) = response.windows(2).position(|window| window == b"\r\n") else {
         return false;
     };
@@ -191,7 +194,10 @@ fn read_http_success(stream: &mut TcpStream) -> bool {
     matches!(
         (
             parts.next(),
-            parts.next().and_then(|code| code.parse::<u16>().ok()),
+            parts
+                .next()
+                .filter(|code| code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_digit()))
+                .and_then(|code| code.parse::<u16>().ok()),
         ),
         (Some("HTTP/1.1" | "HTTP/1.0"), Some(200..=299))
     )

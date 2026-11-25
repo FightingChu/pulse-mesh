@@ -98,3 +98,33 @@ fn appending_during_replay_preserves_new_records() {
     assert_eq!(acknowledged, 2);
     assert!(!cache.path().exists());
 }
+
+#[test]
+fn incomplete_or_invalid_success_headers_keep_cache() {
+    let responses = [
+        b"HTTP/1.1 200 OK\r\n".to_vec(),
+        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n".to_vec(),
+        b"HTTP/1.1 +200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        b"HTTP/1.1 0200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        [b"HTTP/1.1 200 OK\r\nX-Padding: ".as_slice(), &[b'x'; 8192]].concat(),
+    ];
+    for response in responses {
+        let cache = TestCache::new();
+        let body = r#"{"event_id":"pending"}"#;
+        append_cache(cache.path(), body).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(read_request(&mut stream), body);
+            let _ = stream.write_all(&response);
+        });
+        let acknowledged = flush_cache(&address, cache.path());
+        worker.join().unwrap();
+        assert_eq!(acknowledged, 0);
+        assert_eq!(
+            read_cache(cache.path()).unwrap(),
+            vec![format!("{SAMPLE_PATH}\t{body}")]
+        );
+    }
+}
