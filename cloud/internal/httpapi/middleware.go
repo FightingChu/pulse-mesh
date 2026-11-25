@@ -147,6 +147,9 @@ func withRecovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
+				if err == http.ErrAbortHandler {
+					panic(err)
+				}
 				log.Printf("panic %q %q: %q\n%s", r.Method, r.URL.Path, fmt.Sprint(err), debug.Stack())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			}
