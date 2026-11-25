@@ -365,6 +365,9 @@ func validateSample(s ingest.Sample) error {
 	if !finite(s.Value) || !finite(s.TempC) || (s.Level != "" && s.Level != "normal" && s.Level != "warning" && s.Level != "critical") {
 		return errors.New("invalid sample values or level")
 	}
+	if _, err := s.Ts.MarshalJSON(); err != nil {
+		return errors.New("ts must be representable as an RFC 3339 timestamp")
+	}
 	return nil
 }
 

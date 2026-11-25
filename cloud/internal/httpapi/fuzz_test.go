@@ -52,6 +52,8 @@ func FuzzDecodeJSON(f *testing.F) {
 func FuzzSampleJSONRoundTrip(f *testing.F) {
 	f.Add(`{"event_id":"e1","device_id":"motor-01","metric":"v","value":2.5,"temp_c":45,"level":"warning"}`)
 	f.Add(`{"device_id":"m","metric":"x","value":1e308}`)
+	f.Add(`{"device_id":"m","metric":"x","value":1,"ts":"2026-11-26T00:00:00+24:00"}`)
+	f.Add(`{"device_id":"m","metric":"x","value":1,"ts":"2026-11-26T00:00:00-24:00"}`)
 	f.Add(`null`)
 
 	f.Fuzz(func(t *testing.T, body string) {
