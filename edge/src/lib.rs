@@ -166,11 +166,12 @@ pub fn forward_to(addr: &str, path: &str, body: &str) -> bool {
     }
 }
 
-fn read_http_success(stream: &mut TcpStream) -> bool {
+fn read_http_success(stream: &mut impl Read) -> bool {
     let mut response = Vec::with_capacity(256);
     let mut chunk = [0u8; 256];
     while response.len() < 8192 {
-        match stream.read(&mut chunk) {
+        let remaining = (8192 - response.len()).min(chunk.len());
+        match stream.read(&mut chunk[..remaining]) {
             Ok(0) => break,
             Ok(n) => {
                 response.extend_from_slice(&chunk[..n]);
@@ -361,6 +362,7 @@ fn remove_unchanged_cache(path: &Path, snapshot: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     use std::path::PathBuf;
 
     fn temp_path(name: &str) -> PathBuf {
@@ -368,6 +370,33 @@ mod tests {
         p.push(format!("pulse-edge-{}-{}", std::process::id(), name));
         let _ = fs::remove_file(&p);
         p
+    }
+
+    #[test]
+    fn response_header_limit_is_independent_of_read_boundaries() {
+        for header_length in [8191usize, 8192, 8193, 8300] {
+            let mut response = b"HTTP/1.1 200 OK\r\nX-Padding: ".to_vec();
+            response.resize(header_length - 4, b'x');
+            response.extend_from_slice(b"\r\n\r\n");
+            for first_read in [1usize, 127, 256] {
+                let mut stream = Cursor::new(&response[..first_read])
+                    .chain(Cursor::new(&response[first_read..]));
+                assert_eq!(
+                    read_http_success(&mut stream),
+                    header_length <= 8192,
+                    "header length {header_length}, first read {first_read}"
+                );
+                let (prefix, remainder) = stream.into_inner();
+                assert!(prefix.position() + remainder.position() <= 8192);
+            }
+        }
+    }
+
+    #[test]
+    fn response_body_does_not_count_toward_header_limit() {
+        let mut response = b"HTTP/1.1 200 OK\r\nContent-Length: 9000\r\n\r\n".to_vec();
+        response.extend_from_slice(&[b'x'; 9000]);
+        assert!(read_http_success(&mut Cursor::new(response)));
     }
 
     #[test]

@@ -128,3 +128,38 @@ fn incomplete_or_invalid_success_headers_keep_cache() {
         );
     }
 }
+
+#[test]
+fn response_header_limit_controls_cache_acknowledgement() {
+    for header_length in [8191usize, 8192, 8193, 8300] {
+        let cache = TestCache::new();
+        let body = r#"{"event_id":"header-limit"}"#;
+        append_cache(cache.path(), body).unwrap();
+        let prefix = b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\nX-Padding: ";
+        let suffix = b"\r\n\r\n";
+        let mut response = prefix.to_vec();
+        response.resize(header_length - suffix.len(), b'x');
+        response.extend_from_slice(suffix);
+        assert_eq!(response.len(), header_length);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(read_request(&mut stream), body);
+            let _ = stream.write_all(&response);
+        });
+        let acknowledged = flush_cache(&address, cache.path());
+        worker.join().unwrap();
+        if header_length <= 8192 {
+            assert_eq!(acknowledged, 1, "header length {header_length}");
+            assert!(!cache.path().exists());
+        } else {
+            assert_eq!(acknowledged, 0, "header length {header_length}");
+            assert_eq!(
+                read_cache(cache.path()).unwrap(),
+                vec![format!("{SAMPLE_PATH}\t{body}")]
+            );
+        }
+    }
+}
