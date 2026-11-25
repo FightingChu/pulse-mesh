@@ -77,7 +77,7 @@ func (c *Client) Diagnose(ctx context.Context, req Request) (Result, error) {
 	result, countFailure, err := c.doDiagnose(ctx, req)
 	if err == nil {
 		c.finishRequest(probe, true, false)
-	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	} else if callerErr := ctx.Err(); callerErr != nil && errors.Is(err, callerErr) {
 		c.finishRequest(probe, false, false)
 	} else {
 		c.finishRequest(probe, false, countFailure)

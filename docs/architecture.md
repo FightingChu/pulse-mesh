@@ -63,6 +63,7 @@ GET /api/v1/diagnoses?device=motor-01 查历史诊断。AI 地址用 PULSE_AI_UR
 - Prometheus 暴露各 store 的记录数、日志字节数和持久化写失败计数，store 标签固定为 samples / diagnoses / alerts。
 - 未设置 PULSE_DATA_DIR 时使用纯内存模式，适合本地快速开发。
 - AI 连续 3 次发生网络、超时或 5xx 错误后熔断 15 秒，冷却后仅允许一个探测请求；AI 的 4xx 输入错误不计入熔断。
+- AI 客户端自身的超时（等待响应头或读取正文）计入熔断；只有传入的调用方 context 已取消或到期且错误匹配时，才不计入 AI 故障。
 - Python AI HTTP 服务最多 8 个 worker，最多排队 16 个连接；饱和时返回 503/Retry-After: 1，socket 请求读取超时 5 秒，可用 PULSE_AI_MAX_WORKERS 设置 1-64 worker。
 - 云端同时最多运行 4 个频谱诊断请求，超额返回 429 和 Retry-After，避免波形计算与等待 AI 无界堆积。
 - 网关将每 10 条遥测合并到 POST /api/v1/samples/batch，批量上限 100；服务先校验整批，再逐条幂等写入，响应分别报告 stored / duplicates / alerts。
