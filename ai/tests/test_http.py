@@ -62,9 +62,10 @@ class HTTPTest(unittest.TestCase):
         self.assertTrue(entered.wait(timeout=2), 'slow request did not occupy the worker')
         try:
             with self.assertRaises(urllib.error.HTTPError) as ctx:
-                urllib.request.urlopen(base + '/health', timeout=5)
-            self.assertEqual(ctx.exception.code, 503)
-            self.assertEqual(ctx.exception.headers.get('Retry-After'), '1')
+                urllib.request.urlopen(base + '/health', timeout=5).close()
+            with ctx.exception as response:
+                self.assertEqual(response.code, 503)
+                self.assertEqual(response.headers.get('Retry-After'), '1')
         finally:
             release.set()
             slow_thread.join(timeout=5)
@@ -144,8 +145,9 @@ class HTTPTest(unittest.TestCase):
             stalled_client.sendall(b'GET /blocked HTTP/1.1\r\nHost: 127.0.0.1\r\n')
             self.assertTrue(rejection_entered.wait(timeout=2))
             with self.assertRaises(urllib.error.HTTPError) as ctx:
-                urllib.request.urlopen(base + '/health', timeout=1)
-            self.assertEqual(ctx.exception.code, 503)
+                urllib.request.urlopen(base + '/health', timeout=1).close()
+            with ctx.exception as response:
+                self.assertEqual(response.code, 503)
         finally:
             if stalled_client is not None:
                 stalled_client.close()
@@ -269,8 +271,9 @@ class HTTPTest(unittest.TestCase):
 
     def test_unknown_get_route_is_not_found(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
-            urllib.request.urlopen(self.base + "/unknown", timeout=5)
-        self.assertEqual(ctx.exception.code, 404)
+            urllib.request.urlopen(self.base + "/unknown", timeout=5).close()
+        with ctx.exception as response:
+            self.assertEqual(response.code, 404)
 
     def test_unknown_post_route_is_not_found(self):
         req = urllib.request.Request(
@@ -280,8 +283,9 @@ class HTTPTest(unittest.TestCase):
             method="POST",
         )
         with self.assertRaises(urllib.error.HTTPError) as ctx:
-            urllib.request.urlopen(req, timeout=5)
-        self.assertEqual(ctx.exception.code, 404)
+            urllib.request.urlopen(req, timeout=5).close()
+        with ctx.exception as response:
+            self.assertEqual(response.code, 404)
 
     def test_post_assess_critical(self):
         body = json.dumps({
@@ -330,8 +334,8 @@ class HTTPTest(unittest.TestCase):
                 )
                 with self.assertRaises(urllib.error.HTTPError) as ctx:
                     urllib.request.urlopen(req, timeout=5).close()
-                self.assertEqual(ctx.exception.code, 400)
                 with ctx.exception as response:
+                    self.assertEqual(response.code, 400)
                     self.assertEqual(response.headers.get_content_type(), "application/json")
                     raw = response.read()
                     self.assertEqual(int(response.headers["Content-Length"]), len(raw))
@@ -359,8 +363,8 @@ class HTTPTest(unittest.TestCase):
                     )
                     with self.assertRaises(urllib.error.HTTPError) as ctx:
                         urllib.request.urlopen(req, timeout=5).close()
-                    self.assertEqual(ctx.exception.code, 400)
                     with ctx.exception as response:
+                        self.assertEqual(response.code, 400)
                         self.assertIn("error", json.load(response))
 
     def test_post_spectrum_rejects_non_numeric_frequencies(self):
@@ -376,8 +380,8 @@ class HTTPTest(unittest.TestCase):
                     )
                     with self.assertRaises(urllib.error.HTTPError) as ctx:
                         urllib.request.urlopen(req, timeout=5).close()
-                    self.assertEqual(ctx.exception.code, 400)
                     with ctx.exception as response:
+                        self.assertEqual(response.code, 400)
                         self.assertIn("error", json.load(response))
 
     def test_post_spectrum_preserves_numeric_zeros_and_defaults(self):
@@ -432,8 +436,9 @@ class HTTPTest(unittest.TestCase):
             method="POST",
         )
         with self.assertRaises(urllib.error.HTTPError) as ctx:
-            urllib.request.urlopen(req, timeout=10)
-        self.assertEqual(ctx.exception.code, 400)
+            urllib.request.urlopen(req, timeout=10).close()
+        with ctx.exception as response:
+            self.assertEqual(response.code, 400)
 
     def test_post_spectrum_rejects_non_finite_values(self):
         body = json.dumps({
@@ -447,8 +452,9 @@ class HTTPTest(unittest.TestCase):
             method="POST",
         )
         with self.assertRaises(urllib.error.HTTPError) as ctx:
-            urllib.request.urlopen(req, timeout=10)
-        self.assertEqual(ctx.exception.code, 400)
+            urllib.request.urlopen(req, timeout=10).close()
+        with ctx.exception as response:
+            self.assertEqual(response.code, 400)
 
     def test_post_spectrum_rejects_low_sample_rate(self):
         body = json.dumps({
@@ -464,8 +470,9 @@ class HTTPTest(unittest.TestCase):
             method="POST",
         )
         with self.assertRaises(urllib.error.HTTPError) as ctx:
-            urllib.request.urlopen(req, timeout=10)
-        self.assertEqual(ctx.exception.code, 400)
+            urllib.request.urlopen(req, timeout=10).close()
+        with ctx.exception as response:
+            self.assertEqual(response.code, 400)
 
     def test_post_spectrum_requires_string_identity(self):
         for patch in ({"device_id": ""}, {"event_id": []}):
@@ -482,8 +489,9 @@ class HTTPTest(unittest.TestCase):
                 method="POST",
             )
             with self.assertRaises(urllib.error.HTTPError) as ctx:
-                urllib.request.urlopen(req, timeout=10)
-            self.assertEqual(ctx.exception.code, 400)
+                urllib.request.urlopen(req, timeout=10).close()
+            with ctx.exception as response:
+                self.assertEqual(response.code, 400)
 
     def test_post_rejects_multiple_json_values(self):
         req = urllib.request.Request(
@@ -493,8 +501,9 @@ class HTTPTest(unittest.TestCase):
             method="POST",
         )
         with self.assertRaises(urllib.error.HTTPError) as ctx:
-            urllib.request.urlopen(req, timeout=10)
-        self.assertEqual(ctx.exception.code, 400)
+            urllib.request.urlopen(req, timeout=10).close()
+        with ctx.exception as response:
+            self.assertEqual(response.code, 400)
 
     def test_post_rejects_oversized_body(self):
         address = self.server.server_address
