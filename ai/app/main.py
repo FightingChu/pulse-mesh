@@ -190,7 +190,11 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 
     def get_request(self):
         request, address = super().get_request()
-        request.settimeout(self._request_timeout)
+        try:
+            request.settimeout(self._request_timeout)
+        except Exception:
+            request.close()
+            raise
         return request, address
 
     def process_request(self, request, client_address):

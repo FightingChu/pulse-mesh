@@ -2,7 +2,7 @@ import os
 import socket
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
@@ -10,6 +10,35 @@ import main
 
 
 class ServerLimitTest(unittest.TestCase):
+    def test_failed_connection_setup_closes_socket_and_preserves_error(self):
+        server = main.BoundedThreadingHTTPServer(("127.0.0.1", 0), main.H, max_workers=1, request_timeout=0.25)
+        self.addCleanup(server.server_close)
+        for failure in (OSError("socket configuration failed"), ValueError("invalid timeout"), OverflowError("timeout overflow")):
+            with self.subTest(error=type(failure).__name__):
+                with socket.socket() as listener:
+                    listener.bind(("127.0.0.1", 0))
+                    listener.listen(1)
+                    with socket.create_connection(listener.getsockname(), timeout=5) as peer:
+                        accepted, address = listener.accept()
+                        with accepted:
+                            request = Mock(wraps=accepted)
+                            request.settimeout.side_effect = failure
+                            with patch.object(main.ThreadingHTTPServer, "get_request", return_value=(request, address)):
+                                with self.assertRaises(type(failure)) as ctx:
+                                    server.get_request()
+                            self.assertIs(ctx.exception, failure)
+                            request.close.assert_called_once_with()
+                            self.assertEqual(accepted.fileno(), -1)
+                            self.assertEqual(peer.recv(1), b"")
+                self.assertTrue(server._worker_slots.acquire(blocking=False))
+                server._worker_slots.release()
+                self.assertEqual(server._rejection_threads, set())
+                with socket.create_connection(server.server_address, timeout=5):
+                    recovered, address = server.get_request()
+                    with recovered:
+                        self.assertEqual(recovered.gettimeout(), 0.25)
+                        self.assertEqual(address[0], "127.0.0.1")
+
     def test_invalid_request_timeouts_fail_before_binding(self):
         for value in (None, True, False, 0, -1, float("nan"), float("inf"), float("-inf"), "5", 10**400, main.threading.TIMEOUT_MAX):
             with self.subTest(value=value):
