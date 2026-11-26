@@ -191,7 +191,38 @@ int main() {
       expect_near("synthesized ordinary signal components", maximum_error, 0.0, 1e-12);
     }
   }
-
+  const struct {
+    const char* name;
+    double sample_rate;
+    double rotation;
+    double bearing;
+  } invalid_waveforms[] = {
+      {"zero sample rate", 0.0, 25.0, 0.6},
+      {"subminimum sample rate", 239.0, 25.0, 0.6},
+      {"rotation beyond Nyquist", 240.0, 121.0, 0.6},
+      {"negative rotation", 1000.0, -1.0, 0.6},
+      {"negative bearing amplitude", 1000.0, 25.0, -0.1},
+      {"non-finite sample rate", NAN, 25.0, 0.6},
+      {"non-finite rotation", 1000.0, INFINITY, 0.6},
+      {"non-finite bearing amplitude", 1000.0, 25.0, NAN},
+  };
+  for (const auto& invalid : invalid_waveforms) {
+    std::vector<double> rejected(8, 42.0);
+    synthesize_waveform(rejected.data(), rejected.size(), invalid.sample_rate,
+                        invalid.rotation, invalid.bearing);
+    bool all_finite_zero = true;
+    for (double value : rejected) {
+      if (!std::isfinite(value) || value != 0.0) all_finite_zero = false;
+    }
+    if (!all_finite_zero) {
+      std::printf("FAIL invalid waveform was not cleared: %s\n", invalid.name);
+      failures++;
+    } else {
+      std::printf("ok   invalid waveform was cleared: %s\n", invalid.name);
+    }
+  }
+  synthesize_waveform(nullptr, 8, 1000.0, 25.0, 0.6);
+  synthesize_waveform(nullptr, 0, 0.0, 25.0, 0.6);
   std::vector<double> sine(1024);
   for (std::size_t i = 0; i < sine.size(); i++) {
     sine[i] = std::sin(2.0 * 3.14159265358979323846 * 25.0 * (double)i / 1000.0);

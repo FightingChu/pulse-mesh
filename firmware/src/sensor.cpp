@@ -277,6 +277,13 @@ const char* classify_fault(const Spectrum& s, double rotation_hz) {
 
 void synthesize_waveform(double* out, std::size_t n, double sample_rate_hz,
                          double rotation_hz, double bearing_amplitude) {
+  if (out == nullptr || !std::isfinite(sample_rate_hz) || sample_rate_hz < 240.0 ||
+      !std::isfinite(rotation_hz) || rotation_hz < 0.0 ||
+      sample_rate_hz < 2.0 * rotation_hz || !std::isfinite(bearing_amplitude) ||
+      bearing_amplitude < 0.0) {
+    if (out != nullptr) std::fill(out, out + n, 0.0);
+    return;
+  }
   const double rotation_step = 2.0 * kPi * (rotation_hz / sample_rate_hz);
   const double bearing_step = 2.0 * kPi * (120.0 / sample_rate_hz);
   for (std::size_t index = 0; index < n; index++) {
