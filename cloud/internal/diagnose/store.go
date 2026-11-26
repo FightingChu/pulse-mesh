@@ -18,7 +18,8 @@ type Store struct {
 	mu           sync.Mutex
 	items        []Result
 	limit        int
-	seen         map[[sha256.Size]byte]struct{}
+	positions    map[[sha256.Size]byte]uint64
+	firstPos     uint64
 	file         *os.File
 	writesFailed uint64
 	closed       bool
@@ -28,7 +29,7 @@ func NewStore(limit int) *Store {
 	if limit <= 0 {
 		limit = 1000
 	}
-	return &Store{limit: limit, seen: make(map[[sha256.Size]byte]struct{})}
+	return &Store{limit: limit, positions: make(map[[sha256.Size]byte]uint64)}
 }
 
 func OpenStore(path string, limit int) (*Store, error) {
@@ -81,19 +82,20 @@ func (s *Store) load(file *os.File) error {
 func (s *Store) addMemory(r Result) bool {
 	key := resultKey(r.DeviceID, r.EventID)
 	if r.EventID != "" {
-		if _, exists := s.seen[key]; exists {
+		if _, exists := s.positions[key]; exists {
 			return false
 		}
-		s.seen[key] = struct{}{}
+		s.positions[key] = s.firstPos + uint64(len(s.items))
 	}
 	s.items = append(s.items, r)
 	if len(s.items) > s.limit {
 		removed := s.items[0]
 		if removed.EventID != "" {
 			removedKey := resultKey(removed.DeviceID, removed.EventID)
-			delete(s.seen, removedKey)
+			delete(s.positions, removedKey)
 		}
 		s.items = s.items[len(s.items)-s.limit:]
+		s.firstPos++
 	}
 	return true
 }
@@ -106,7 +108,7 @@ func (s *Store) Add(r Result) (bool, error) {
 	}
 	key := resultKey(r.DeviceID, r.EventID)
 	if r.EventID != "" {
-		if _, exists := s.seen[key]; exists {
+		if _, exists := s.positions[key]; exists {
 			return false, nil
 		}
 	}
@@ -135,15 +137,11 @@ func (s *Store) Get(device, eventID string) (Result, bool) {
 	if s.closed {
 		return Result{}, false
 	}
-	if _, retained := s.seen[key]; !retained {
+	position, retained := s.positions[key]
+	if !retained {
 		return Result{}, false
 	}
-	for i := len(s.items) - 1; i >= 0; i-- {
-		if resultKey(s.items[i].DeviceID, s.items[i].EventID) == key {
-			return s.items[i], true
-		}
-	}
-	return Result{}, false
+	return s.items[position-s.firstPos], true
 }
 
 func resultKey(deviceID, eventID string) [sha256.Size]byte {
