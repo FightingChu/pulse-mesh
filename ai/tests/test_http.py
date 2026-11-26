@@ -380,9 +380,9 @@ class HTTPTest(unittest.TestCase):
         self.assertEqual(payload["rms"], 0.0)
 
     def test_post_numeric_overflow_returns_json_error(self):
+        maximum = float.fromhex("0x1.fffffffffffffp+1023")
         cases = (
-            ("/spectrum", [1e308] * 1024),
-            ("/spectrum", [1e200 * math.sin(2 * math.pi * 120 * index / 1000) for index in range(1024)]),
+            ("/spectrum", [maximum] * 512 + [-maximum] * 512),
         )
         for index, (path, values) in enumerate(cases):
             with self.subTest(path=path, case=index):
@@ -420,6 +420,22 @@ class HTTPTest(unittest.TestCase):
                 self.assertTrue(math.isfinite(payload["rms"]))
                 self.assertAlmostEqual(payload["rms"] / max(abs(value) for value in values), 1.0)
                 self.assertEqual(payload["level"], "normal")
+
+    def test_post_spectrum_preserves_large_representable_amplitudes(self):
+        reference_values = [math.sin(2 * math.pi * 120 * index / 1000) for index in range(1024)]
+        values = [1e200 * value for value in reference_values]
+        expected = main.diagnose("motor-01", reference_values)["peak_amplitude"]
+        request = urllib.request.Request(
+            self.base + "/spectrum",
+            data=json.dumps({"device_id": "motor-01", "values": values}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            payload = json.load(response, parse_constant=lambda value: self.fail(value))
+        self.assertTrue(math.isfinite(payload["peak_amplitude"]))
+        self.assertAlmostEqual(payload["peak_amplitude"] / 1e200, expected, delta=0.01)
+        self.assertEqual(payload["fault"], "bearing_wear")
 
     def test_post_rejects_invalid_sample_types(self):
         invalid_values = [None, False, 0, "", {}, {"0": 0}]

@@ -51,11 +51,19 @@ def _spectrum_features(values, sample_rate_hz):
     if sample_rate_hz <= 0:
         raise ValueError("sample_rate_hz must be positive")
 
-    mean = sum(values) / n
-    if not math.isfinite(mean):
-        raise ValueError("spectrum exceeds numeric range")
+    scale = max(abs(value) for value in values)
+    if scale == 0.0:
+        return {
+            "dominant_hz": 0.0,
+            "peak_amplitude": 0.0,
+            "low_band": 0.0,
+            "mid_band": 0.0,
+            "high_band": 0.0,
+        }
+    normalized = [value / scale for value in values]
+    mean = math.fsum(normalized) / n
     window = hann(n)
-    prepared = [(values[i] - mean) * window[i] for i in range(n)]
+    prepared = [(normalized[i] - mean) * window[i] for i in range(n)]
     spectrum = fft(prepared)
 
     half = n // 2
@@ -63,10 +71,7 @@ def _spectrum_features(values, sample_rate_hz):
     total = 0.0
     peak_bin = 1
     for k in range(1, half + 1):
-        try:
-            power[k] = abs(spectrum[k]) ** 2
-        except OverflowError as exc:
-            raise ValueError("spectrum exceeds numeric range") from exc
+        power[k] = abs(spectrum[k]) ** 2
         total += power[k]
         if power[k] > power[peak_bin]:
             peak_bin = k
@@ -92,9 +97,12 @@ def _spectrum_features(values, sample_rate_hz):
         elif hz <= 500.0:
             bands["high_band"] += power[k]
 
+    peak_amplitude = abs(spectrum[peak_bin]) * (2.0 if peak_bin == half else 4.0) / (n - 1) * scale
+    if not math.isfinite(peak_amplitude):
+        raise ValueError("spectrum exceeds numeric range")
     return {
         "dominant_hz": peak_bin * bin_hz,
-        "peak_amplitude": abs(spectrum[peak_bin]) * (2.0 if peak_bin == half else 4.0) / (n - 1),
+        "peak_amplitude": peak_amplitude,
         "low_band": bands["low_band"] / total,
         "mid_band": bands["mid_band"] / total,
         "high_band": bands["high_band"] / total,

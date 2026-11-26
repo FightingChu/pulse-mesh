@@ -130,7 +130,7 @@ Python AI 使用标准 JSON 解码器处理首尾空白，仅接受空格、制�
 
 Python AI 在解码 JSON 前限制容器嵌套深度为 128 层；超深对象或数组返回含 `nesting` 的 JSON 400，不调用分析器，也不依赖进程全局递归上限。
 
-有限输入仍可能在均值、方差、RMS 或频谱能量计算中溢出。Python AI 在分级前拒绝无法得到有限结果的计算，返回含 `numeric range` 的 JSON 400，不把无效结果判为 `normal`；响应序列化禁止输出 `NaN` / `Infinity`。
+Python AI 对统计和频谱计算进行尺度归一化，避免有限高幅输入仅因中间平方或累加溢出而被误拒；若最终 RMS 或峰值幅度本身超出浮点范围，仍在分级前返回含 `numeric range` 的 JSON 400，不把无效结果判为 `normal`。响应序列化禁止输出 `NaN` / `Infinity`。
 
 Python AI 在解析 JSON 和执行分析前核对实际收到的请求体长度；连接提前结束、字节数不足 `Content-Length` 时返回 JSON 400 并关闭连接，即使已收到的部分恰好是完整 JSON，也不予处理。显式零长度请求保留原有行为，长度正确的请求仍支持 HTTP keep-alive。
 

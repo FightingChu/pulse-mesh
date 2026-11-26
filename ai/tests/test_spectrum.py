@@ -83,23 +83,41 @@ class SpectrumTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             spectrum.analyze(tone(25.0), 0)
 
-    def test_rejects_numeric_overflow_before_classification(self):
-        for name, values in (
-            ("mean", [1e308] * N),
-            ("power", tone(120.0, 1e200)),
-            ("energy_sum", [2.5e151, -2.5e151] * (N // 2)),
-        ):
-            with self.subTest(stage=name):
-                with self.assertRaisesRegex(ValueError, "numeric range"):
-                    spectrum.diagnose(values, RATE, 25.0)
+    def test_large_finite_inputs_preserve_spectrum_features(self):
+        cases = (
+            ([1e308] * N, [0.0] * N),
+            (tone(120.0, 1e200), tone(120.0)),
+            ([2.5e151, -2.5e151] * (N // 2), [1.0, -1.0] * (N // 2)),
+        )
+        for values, reference_values in cases:
+            with self.subTest(scale=max(abs(value) for value in values)):
+                result = spectrum.diagnose(values, RATE, 25.0)
+                reference = spectrum.diagnose(reference_values, RATE, 25.0)
+                self.assertEqual(result["fault"], reference["fault"])
+                for feature in ("dominant_hz", "low_band", "mid_band", "high_band"):
+                    self.assertEqual(result[feature], reference[feature])
+                if reference["peak_amplitude"]:
+                    self.assertAlmostEqual(
+                        result["peak_amplitude"] / max(abs(value) for value in values),
+                        reference["peak_amplitude"] / max(abs(value) for value in reference_values),
+                        places=4,
+                    )
+
+    def test_rejects_peak_amplitude_outside_numeric_range(self):
+        maximum = float.fromhex("0x1.fffffffffffffp+1023")
+        values = [maximum] * (N // 2) + [-maximum] * (N // 2)
+        with self.assertRaisesRegex(ValueError, "numeric range"):
+            spectrum.diagnose(values, RATE, 25.0)
 
     def test_large_representable_tone_preserves_features(self):
         reference = spectrum.diagnose(tone(120.0), RATE, 25.0)
-        result = spectrum.diagnose(tone(120.0, 1e100), RATE, 25.0)
-        self.assertEqual(result["fault"], reference["fault"])
-        for feature in ("dominant_hz", "low_band", "mid_band", "high_band"):
-            self.assertEqual(result[feature], reference[feature])
-        self.assertAlmostEqual(result["peak_amplitude"] / 1e100, reference["peak_amplitude"], places=4)
+        for amplitude in (1e100, 1e154, 1e200, 1e308):
+            with self.subTest(amplitude=amplitude):
+                result = spectrum.diagnose(tone(120.0, amplitude), RATE, 25.0)
+                self.assertEqual(result["fault"], reference["fault"])
+                for feature in ("dominant_hz", "low_band", "mid_band", "high_band"):
+                    self.assertEqual(result[feature], reference[feature])
+                self.assertAlmostEqual(result["peak_amplitude"] / amplitude, reference["peak_amplitude"], places=4)
 
 
 if __name__ == "__main__":
