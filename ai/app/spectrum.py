@@ -94,7 +94,7 @@ def _spectrum_features(values, sample_rate_hz):
 
     return {
         "dominant_hz": peak_bin * bin_hz,
-        "peak_amplitude": abs(spectrum[peak_bin]) * 4.0 / n,
+        "peak_amplitude": abs(spectrum[peak_bin]) * (2.0 if peak_bin == half else 4.0) / (n - 1),
         "low_band": bands["low_band"] / total,
         "mid_band": bands["mid_band"] / total,
         "high_band": bands["high_band"] / total,

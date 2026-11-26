@@ -16,6 +16,14 @@ def tone(hz, amplitude=1.0, n=N, rate=RATE):
 
 
 class SpectrumTest(unittest.TestCase):
+    def test_bin_centered_peak_amplitudes(self):
+        for size in (8, 64, 1024):
+            for cycle in ((3.0, -3.0), (3.0, 0.0, -3.0, 0.0)):
+                with self.subTest(size=size, period=len(cycle)):
+                    result = spectrum.analyze(cycle * (size // len(cycle)), RATE)
+                    self.assertEqual(result["dominant_hz"], RATE / len(cycle))
+                    self.assertEqual(result["peak_amplitude"], 3.0)
+
     def test_fft_rejects_bad_length(self):
         with self.assertRaises(ValueError):
             spectrum.fft([1.0, 2.0, 3.0])

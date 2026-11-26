@@ -202,6 +202,18 @@ int main() {
   expect_str("imbalance", classify_fault(s, 25.0), "imbalance");
 
   SpectrumWorkspace workspace{};
+  for (std::size_t size : {8, 64, 1024}) {
+    for (std::size_t period : {2, 4}) {
+      std::vector<double> samples(size);
+      for (std::size_t index = 0; index < size; index++) {
+        const std::size_t offset = index % period;
+        samples[index] = offset == 0 ? 3.0 : (offset == period / 2 ? -3.0 : 0.0);
+      }
+      const Spectrum peak = analyze_spectrum(samples.data(), size, 1000.0, workspace);
+      expect_near("bin-centered frequency", peak.dominant_hz, 1000.0 / period, 1e-6);
+      expect_near("bin-centered amplitude", peak.peak_amplitude, 3.0, 1e-5);
+    }
+  }
   Spectrum reused = analyze_spectrum(sine.data(), sine.size(), 1000.0, workspace);
   expect_near("workspace reuse dominant", reused.dominant_hz, 25.0, 2.0);
   expect_near("workspace reuse amplitude", reused.peak_amplitude, 1.0, 0.1);

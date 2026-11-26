@@ -239,8 +239,8 @@ Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_ra
 
   const double bin_hz = sample_rate_hz / (double)n;
   out.dominant_hz = (double)peak_bin * bin_hz;
-  // Hann window has a coherent gain of 0.5, so compensate by 2x.
-  out.peak_amplitude = (std::sqrt(peak_power) * 4.0 / (double)n) * scale;
+  const double amplitude_factor = (peak_bin == half ? 2.0 : 4.0) / (double)(n - 1);
+  out.peak_amplitude = std::sqrt(peak_power) * amplitude_factor * scale;
 
   double low = 0.0;
   double mid = 0.0;
