@@ -21,6 +21,7 @@ func TestRecoveryPropagatesAbortWithoutWritingOrLogging(t *testing.T) {
 			response := httptest.NewRecorder()
 			handler := withRecovery(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				if prefix != "" {
+					writer.Header().Set("Content-Length", "128")
 					_, _ = io.WriteString(writer, prefix)
 				}
 				panic(http.ErrAbortHandler)
@@ -73,7 +74,7 @@ func TestRecoveryAbortInterruptsHTTPResponse(t *testing.T) {
 				body, readErr := io.ReadAll(response.Body)
 				response.Body.Close()
 				if !errors.Is(readErr, io.ErrUnexpectedEOF) || string(body) != prefix {
-					t.Fatalf("aborted body = %q, error=%v; want unchanged prefix and unexpected EOF", body, readErr)
+					t.Fatalf("aborted body = %q, error=%v; want unchanged prefix and interrupted response", body, readErr)
 				}
 			}
 			health, err := server.Client().Get(server.URL + "/health")

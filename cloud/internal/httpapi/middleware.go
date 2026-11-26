@@ -13,21 +13,28 @@ import (
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status  int
+	started bool
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 	if r.status == 0 && (code >= http.StatusOK || code == http.StatusSwitchingProtocols) {
 		r.status = code
+		r.started = true
 	}
 }
 
 func (r *statusRecorder) Write(body []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK
+		r.started = true
 	}
 	return r.ResponseWriter.Write(body)
+}
+
+func (r *statusRecorder) responseStarted() bool {
+	return r.started
 }
 
 type Metrics struct {
@@ -119,14 +126,20 @@ func withLogging(metrics *Metrics, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w}
+		defer func() {
+			recovered := recover()
+			if rec.status == 0 && recovered == nil {
+				rec.status = http.StatusOK
+			}
+			if normalizePath(r.URL.Path) != "/metrics" || r.Method == http.MethodOptions {
+				metrics.observe(r.Method, r.URL.Path, rec.status)
+			}
+			log.Printf("%q %q %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Microsecond))
+			if recovered != nil {
+				panic(recovered)
+			}
+		}()
 		next.ServeHTTP(rec, r)
-		if rec.status == 0 {
-			rec.status = http.StatusOK
-		}
-		if normalizePath(r.URL.Path) != "/metrics" || r.Method == http.MethodOptions {
-			metrics.observe(r.Method, r.URL.Path, rec.status)
-		}
-		log.Printf("%q %q %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Microsecond))
 	})
 }
 
@@ -147,8 +160,9 @@ func withRecovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				if err == http.ErrAbortHandler {
-					panic(err)
+				rec, logged := w.(*statusRecorder)
+				if err == http.ErrAbortHandler || (logged && rec.responseStarted()) {
+					panic(http.ErrAbortHandler)
 				}
 				log.Printf("panic %q %q: %q\n%s", r.Method, r.URL.Path, fmt.Sprint(err), debug.Stack())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
