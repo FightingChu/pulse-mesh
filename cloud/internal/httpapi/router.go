@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -92,6 +93,10 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid query encoding"})
 				return
 			}
+			if err := validateSingleQueryValue(query, "device"); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
 			limit, err := queryLimit(query, 100)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -163,6 +168,12 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid query encoding"})
 			return
+		}
+		for _, name := range []string{"device", "include_acked"} {
+			if err := validateSingleQueryValue(query, name); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
 		}
 		includeAcked := query.Get("include_acked") == "1"
 		writeJSON(w, http.StatusOK, engine.List(query.Get("device"), includeAcked))
@@ -312,6 +323,10 @@ func New(store *ingest.Store, engine *alerts.Engine, ai *diagnose.Client, diagno
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid query encoding"})
 			return
 		}
+		if err := validateSingleQueryValue(query, "device"); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		limit, err := queryLimit(query, 100)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -411,13 +426,23 @@ func processSamples(store *ingest.Store, engine *alerts.Engine, samples []ingest
 }
 
 func queryLimit(query url.Values, defaultLimit int) (int, error) {
-	raw := query.Get("limit")
-	if raw == "" {
+	values, exists := query["limit"]
+	if !exists {
 		return defaultLimit, nil
 	}
-	limit, err := strconv.Atoi(raw)
+	if len(values) != 1 || values[0] == "" {
+		return 0, errors.New("limit must be provided once as an integer between 1 and 100")
+	}
+	limit, err := strconv.Atoi(values[0])
 	if err != nil || limit < 1 || limit > 100 {
 		return 0, errors.New("limit must be an integer between 1 and 100")
 	}
 	return limit, nil
+}
+
+func validateSingleQueryValue(query url.Values, name string) error {
+	if values, exists := query[name]; exists && len(values) != 1 {
+		return fmt.Errorf("%s must be provided at most once", name)
+	}
+	return nil
 }

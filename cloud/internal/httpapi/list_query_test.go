@@ -35,7 +35,7 @@ func TestListQueriesRejectMalformedEncodingWithoutDroppingFilters(t *testing.T) 
 	for _, endpoint := range []string{"/api/v1/samples", "/api/v1/alerts", "/api/v1/diagnoses"} {
 		for _, query := range []string{
 			"device=%zz", "device=%", "device=motor-02;limit=1",
-			"device=motor-02&limit=%zz", "device=motor-02&include_acked=%zz",
+			"device=motor-02&limit=%zz",
 			"device=motor-02&%zz=ignored",
 		} {
 			t.Run(endpoint+"?"+query, func(t *testing.T) {
@@ -72,5 +72,62 @@ func TestListQueriesRejectMalformedEncodingWithoutDroppingFilters(t *testing.T) 
 				}
 			})
 		}
+	}
+	for _, endpoint := range []string{"/api/v1/samples", "/api/v1/diagnoses"} {
+		for _, query := range []string{"limit=1&limit=100", "limit=100&limit=1"} {
+			t.Run(endpoint+"?"+query, func(t *testing.T) {
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, endpoint+"?"+query, nil))
+				if response.Code != http.StatusBadRequest {
+					t.Errorf("duplicate limit returned %d: %s", response.Code, response.Body.String())
+				}
+			})
+		}
+	}
+	for _, query := range []string{"include_acked=0&include_acked=1", "include_acked=1&include_acked=0"} {
+		t.Run("/api/v1/alerts?"+query, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?"+query, nil))
+			if response.Code != http.StatusBadRequest {
+				t.Errorf("duplicate include_acked returned %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestListQueriesRejectDuplicateRecognizedParameters(t *testing.T) {
+	samples := ingest.NewStore()
+	engine := alerts.New(time.Minute)
+	diagnoses := diagnose.NewStore(10)
+	for _, device := range []string{"motor-01", "pump-02"} {
+		sample := ingest.Sample{DeviceID: device, Metric: "vibration", Value: 1.2}
+		if added, err := samples.Add(sample); err != nil || !added {
+			t.Fatalf("seed sample: %v %v", added, err)
+		}
+		if added, err := diagnoses.Add(diagnose.Result{DeviceID: device, Fault: "normal"}); err != nil || !added {
+			t.Fatalf("seed diagnosis: %v %v", added, err)
+		}
+	}
+	handler := httpapi.New(samples, engine, diagnose.NewClient("http://127.0.0.1:1"), diagnoses)
+	for _, request := range []struct{ endpoint, query string }{
+		{"/api/v1/samples", "device=motor-01&device=pump-02"},
+		{"/api/v1/samples", "device=&device=pump-02"},
+		{"/api/v1/samples", "limit=1&limit=2"},
+		{"/api/v1/diagnoses", "device=motor-01&device=pump-02"},
+		{"/api/v1/diagnoses", "limit=1&limit=2"},
+		{"/api/v1/alerts", "device=motor-01&device=pump-02"},
+		{"/api/v1/alerts", "include_acked=0&include_acked=1"},
+	} {
+		t.Run(request.endpoint+"?"+request.query, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, request.endpoint+"?"+request.query, nil))
+			if response.Code != http.StatusBadRequest {
+				t.Errorf("duplicate query parameter returned %d: %s", response.Code, response.Body.String())
+			}
+			var result map[string]string
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result["error"] == "" {
+				t.Errorf("expected JSON error, got %s (%v)", response.Body.String(), err)
+			}
+		})
 	}
 }
