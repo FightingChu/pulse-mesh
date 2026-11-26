@@ -135,6 +135,9 @@ func (s *Store) Get(device, eventID string) (Result, bool) {
 	if s.closed {
 		return Result{}, false
 	}
+	if _, retained := s.seen[key]; !retained {
+		return Result{}, false
+	}
 	for i := len(s.items) - 1; i >= 0; i-- {
 		if resultKey(s.items[i].DeviceID, s.items[i].EventID) == key {
 			return s.items[i], true
