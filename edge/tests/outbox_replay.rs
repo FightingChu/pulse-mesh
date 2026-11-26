@@ -323,3 +323,86 @@ fn complete_unterminated_record_can_be_acknowledged_before_appending() {
         );
     }
 }
+
+#[test]
+fn oversized_cache_is_not_loaded_replayed_or_modified() {
+    let cache = TestCache::new();
+    let prefix = format!("{SAMPLE_PATH}\t{{\"event_id\":\"preserve-me\"}}\n");
+    let length = 64 * 1024 * 1024 + 1;
+    {
+        let mut file = fs::File::create(cache.path()).unwrap();
+        file.write_all(prefix.as_bytes()).unwrap();
+        file.set_len(length).unwrap();
+    }
+    let result = read_cache(cache.path());
+    assert!(result.is_err(), "loaded a cache larger than 64 MiB");
+    assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    assert_eq!(
+        flush_cache(&listener.local_addr().unwrap().to_string(), cache.path()),
+        0
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(cache.path().metadata().unwrap().len(), length);
+    let mut retained = vec![0; prefix.len()];
+    fs::File::open(cache.path())
+        .unwrap()
+        .read_exact(&mut retained)
+        .unwrap();
+    assert_eq!(retained, prefix.as_bytes());
+}
+
+#[test]
+fn cache_at_capacity_can_still_be_read() {
+    let cache = TestCache::new();
+    let limit = 64 * 1024 * 1024;
+    fs::File::create(cache.path())
+        .unwrap()
+        .set_len(limit)
+        .unwrap();
+    let records = read_cache(cache.path()).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].len() as u64, limit);
+    assert!(records[0].bytes().all(|byte| byte == 0));
+    assert_eq!(cache.path().metadata().unwrap().len(), limit);
+}
+
+#[test]
+fn cache_that_grows_over_capacity_during_replay_is_preserved() {
+    let cache = TestCache::new();
+    let body = r#"{"event_id":"before-growth"}"#;
+    append_cache(cache.path(), body).unwrap();
+    let original = fs::read(cache.path()).unwrap();
+    let length = 64 * 1024 * 1024 + 1;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let writer_path = cache.0.clone();
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        assert_eq!(read_request(&mut stream), body);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(writer_path)
+            .unwrap()
+            .set_len(length)
+            .unwrap();
+        stream
+            .write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n")
+            .unwrap();
+    });
+    let acknowledged = flush_cache(&address, cache.path());
+    worker.join().unwrap();
+    assert_eq!(acknowledged, 1);
+    assert_eq!(cache.path().metadata().unwrap().len(), length);
+    let mut retained = vec![0; original.len()];
+    fs::File::open(cache.path())
+        .unwrap()
+        .read_exact(&mut retained)
+        .unwrap();
+    assert_eq!(retained, original);
+}

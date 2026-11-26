@@ -350,6 +350,26 @@ pub fn append_cache_to(path: &Path, route: &str, body: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn read_cache_snapshot(path: &Path) -> io::Result<String> {
+    let file = fs::File::open(path)?;
+    if file.metadata()?.len() > MAX_CACHE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "offline cache limit exceeded",
+        ));
+    }
+    let mut content = String::new();
+    file.take(MAX_CACHE_BYTES + 1)
+        .read_to_string(&mut content)?;
+    if content.len() as u64 > MAX_CACHE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "offline cache limit exceeded",
+        ));
+    }
+    Ok(content)
+}
+
 pub fn read_cache(path: &Path) -> io::Result<Vec<String>> {
     let _guard = OUTBOX_LOCK
         .lock()
@@ -357,7 +377,7 @@ pub fn read_cache(path: &Path) -> io::Result<Vec<String>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let content = fs::read_to_string(path)?;
+    let content = read_cache_snapshot(path)?;
     Ok(content.lines().map(String::from).collect())
 }
 
@@ -366,7 +386,7 @@ pub fn flush_cache(addr: &str, path: &Path) -> usize {
         let Ok(_guard) = OUTBOX_LOCK.lock() else {
             return 0;
         };
-        match fs::read_to_string(path) {
+        match read_cache_snapshot(path) {
             Ok(content) => content,
             Err(_) => return 0,
         }
@@ -399,7 +419,7 @@ fn remove_unchanged_cache(path: &Path, snapshot: &str) {
     let Ok(_guard) = OUTBOX_LOCK.lock() else {
         return;
     };
-    if let Ok(current) = fs::read_to_string(path) {
+    if let Ok(current) = read_cache_snapshot(path) {
         if current == snapshot {
             let _ = fs::remove_file(path);
         }
