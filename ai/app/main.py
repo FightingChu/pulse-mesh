@@ -11,6 +11,7 @@ SD_FLOOR = 1e-6
 WARN_Z = 3.0
 CRITICAL_Z = 6.0
 MAX_BODY_BYTES = 128 * 1024
+MAX_JSON_NESTING = 128
 MAX_WAVEFORM_VALUES = 1024
 MIN_DIAGNOSIS_SAMPLE_RATE_HZ = 240.0
 DEFAULT_MAX_WORKERS = 8
@@ -18,7 +19,12 @@ MAX_WORKERS_LIMIT = 64
 REQUEST_TIMEOUT_SECONDS = 5
 
 def rms(values):
-    return math.sqrt(sum(v*v for v in values)/len(values)) if values else 0.0
+    if not values:
+        return 0.0
+    scale = max(abs(value) for value in values)
+    if scale == 0.0:
+        return 0.0
+    return scale * math.sqrt(sum((value / scale) ** 2 for value in values) / len(values))
 
 def baseline(values):
     return values[:-1]
@@ -26,9 +32,16 @@ def baseline(values):
 def zscore(value, history):
     if len(history) < MIN_HISTORY:
         return 0.0
-    mean = sum(history)/len(history)
-    sd = math.sqrt(sum((v-mean)**2 for v in history)/len(history))
-    return (value-mean)/max(sd, SD_FLOOR)
+    scale = max(abs(value), *(abs(item) for item in history))
+    if scale == 0.0:
+        return 0.0
+    normalized_history = [item / scale for item in history]
+    mean = math.fsum(normalized_history) / len(normalized_history)
+    sd = math.sqrt(math.fsum((item - mean) ** 2 for item in normalized_history) / len(normalized_history))
+    delta = value / scale - mean
+    if scale <= SD_FLOOR:
+        return delta * (scale / SD_FLOOR)
+    return delta / max(sd, SD_FLOOR / scale)
 
 def level_of(z):
     if abs(z) >= CRITICAL_Z:
@@ -82,6 +95,28 @@ def _parse_content_length(value):
         raise ValueError('invalid content-length')
     return int(value)
 
+def _validate_json_nesting(text):
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == '\\':
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in '[{':
+            depth += 1
+            if depth > MAX_JSON_NESTING:
+                raise ValueError('JSON nesting exceeds maximum depth of %d' % MAX_JSON_NESTING)
+        elif character in ']}':
+            depth -= 1
+
 class H(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
@@ -127,6 +162,7 @@ class H(BaseHTTPRequestHandler):
                 self._send({'error': 'incomplete request body'}, 400)
                 return
             text = (raw or b'{}').decode('utf-8')
+            _validate_json_nesting(text)
             decoder = json.JSONDecoder(parse_constant=lambda value: (_ for _ in ()).throw(ValueError('invalid numeric constant: ' + value)))
             body = decoder.decode(text)
             if not isinstance(body, dict):

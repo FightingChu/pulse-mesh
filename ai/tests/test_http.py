@@ -381,9 +381,6 @@ class HTTPTest(unittest.TestCase):
 
     def test_post_numeric_overflow_returns_json_error(self):
         cases = (
-            ("/assess", [1e308] * 6),
-            ("/assess", [1e200, -1e200] * 3),
-            ("/assess", [1e308]),
             ("/spectrum", [1e308] * 1024),
             ("/spectrum", [1e200 * math.sin(2 * math.pi * 120 * index / 1000) for index in range(1024)]),
         )
@@ -408,6 +405,21 @@ class HTTPTest(unittest.TestCase):
                     json.dumps(payload, allow_nan=False)
         with urllib.request.urlopen(self.base + "/health", timeout=5) as response:
             self.assertEqual(response.status, 200)
+
+    def test_post_assess_preserves_large_representable_values(self):
+        for index, values in enumerate(([1e308] * 6, [1e200, -1e200] * 3, [1e308])):
+            with self.subTest(case=index):
+                request = urllib.request.Request(
+                    self.base + "/assess",
+                    data=json.dumps({"device_id": "motor-01", "values": values}).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    payload = json.load(response, parse_constant=lambda value: self.fail(value))
+                self.assertTrue(math.isfinite(payload["rms"]))
+                self.assertAlmostEqual(payload["rms"] / max(abs(value) for value in values), 1.0)
+                self.assertEqual(payload["level"], "normal")
 
     def test_post_rejects_invalid_sample_types(self):
         invalid_values = [None, False, 0, "", {}, {"0": 0}]
@@ -566,6 +578,26 @@ class HTTPTest(unittest.TestCase):
             urllib.request.urlopen(req, timeout=10).close()
         with ctx.exception as response:
             self.assertEqual(response.code, 400)
+
+    def test_post_rejects_deeply_nested_json_before_analysis(self):
+        for path, operation in (("/assess", "assess"), ("/spectrum", "diagnose")):
+            for depth in (2000, 3000):
+                with self.subTest(path=path, depth=depth):
+                    body = b'{"ignored":' + b"[" * depth + b"0" + b"]" * depth + b',"values":[]}'
+                    request = urllib.request.Request(
+                        self.base + path,
+                        data=body,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with patch.object(main, operation, wraps=getattr(main, operation)) as analyze:
+                        with self.assertRaises(urllib.error.HTTPError) as ctx:
+                            urllib.request.urlopen(request, timeout=5).close()
+                        with ctx.exception as response:
+                            self.assertEqual(response.code, 400)
+                            self.assertEqual(response.headers.get_content_type(), "application/json")
+                            error = json.load(response)["error"].lower()
+                            self.assertTrue("depth" in error or "nest" in error, error)
+                        analyze.assert_not_called()
 
     def test_post_rejects_non_json_whitespace_before_analysis(self):
         body = json.dumps({"device_id": "motor-01", "values": [0.0] * 1024})
