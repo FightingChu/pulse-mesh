@@ -14,6 +14,8 @@ RMS 先按最大绝对值缩放再累加平方，避免有限大数的平方溢�
 
 构建和算法测试沿用 CMake/CTest：
 
+数值近似断言要求实际值、期望值及容差均有限，且容差非负；测试包含判据自检，防止 `NaN` 或无穷大被误判为通过。
+
 ```powershell
 cmake -S . -B build -G "MinGW Makefiles"
 cmake --build build --parallel

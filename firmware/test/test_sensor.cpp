@@ -13,8 +13,13 @@ namespace {
 int failures = 0;
 constexpr double kPiTest = 3.14159265358979323846;
 
+bool within_tolerance(double actual, double expected, double tolerance) {
+  return std::isfinite(actual) && std::isfinite(expected) && std::isfinite(tolerance) &&
+         tolerance >= 0.0 && std::fabs(actual - expected) <= tolerance;
+}
+
 void expect_near(const char* name, double got, double want, double tol) {
-  if (std::fabs(got - want) > tol) {
+  if (!within_tolerance(got, want, tol)) {
     std::printf("FAIL %s: got %.6f want %.6f\n", name, got, want);
     failures++;
   } else {
@@ -33,6 +38,37 @@ void expect_str(const char* name, const char* got, const char* want) {
 }  // namespace
 
 int main() {
+  const struct {
+    const char* name;
+    double actual;
+    double expected;
+    double tolerance;
+    bool accepted;
+  } comparison_cases[] = {
+      {"NaN actual", NAN, 1.0, 0.1, false},
+      {"NaN expected", 1.0, NAN, 0.1, false},
+      {"NaN tolerance", 2.0, 1.0, NAN, false},
+      {"positive infinity", INFINITY, INFINITY, 0.1, false},
+      {"negative infinity", -INFINITY, -INFINITY, 0.1, false},
+      {"infinite actual", INFINITY, 1.0, 0.1, false},
+      {"infinite expected", 1.0, INFINITY, 0.1, false},
+      {"infinite tolerance", 2.0, 1.0, INFINITY, false},
+      {"negative tolerance", 1.0, 1.0, -0.1, false},
+      {"zero tolerance", 1.0, 1.0, 0.0, true},
+      {"within tolerance", 1.125, 1.0, 0.25, true},
+      {"inclusive boundary", 1.25, 1.0, 0.25, true},
+      {"outside tolerance", 1.5, 1.0, 0.25, false},
+      {"signed zero", -0.0, 0.0, 0.0, true},
+  };
+  for (const auto& comparison : comparison_cases) {
+    if (within_tolerance(comparison.actual, comparison.expected, comparison.tolerance) !=
+        comparison.accepted) {
+      std::printf("FAIL numeric assertion self-check: %s\n", comparison.name);
+      failures++;
+    } else {
+      std::printf("ok   numeric assertion self-check: %s\n", comparison.name);
+    }
+  }
   char json_line[256];
   const std::size_t sample_json_size = serialize_sample_json(
       json_line, sizeof(json_line), "event\"42", "motor\\01", "vibration_rms", 4.8,
