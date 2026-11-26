@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 type DirectoryLock struct {
+	mu   sync.Mutex
 	file *os.File
 }
 
@@ -33,8 +35,14 @@ func (l *DirectoryLock) Close() error {
 	if l == nil {
 		return nil
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.file == nil {
+		return nil
+	}
 	unlockErr := unlockFile(l.file)
 	closeErr := l.file.Close()
+	l.file = nil
 	if unlockErr != nil {
 		return unlockErr
 	}
