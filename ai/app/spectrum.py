@@ -44,7 +44,7 @@ def fft(values):
     return a
 
 
-def analyze(values, sample_rate_hz):
+def _spectrum_features(values, sample_rate_hz):
     n = len(values)
     if not is_power_of_two(n) or n < 8:
         raise ValueError("values length must be a power of two and at least 8")
@@ -93,12 +93,20 @@ def analyze(values, sample_rate_hz):
             bands["high_band"] += power[k]
 
     return {
-        "dominant_hz": round(peak_bin * bin_hz, 2),
-        "peak_amplitude": round(abs(spectrum[peak_bin]) * 4.0 / n, 4),
-        "low_band": round(bands["low_band"] / total, 4),
-        "mid_band": round(bands["mid_band"] / total, 4),
-        "high_band": round(bands["high_band"] / total, 4),
+        "dominant_hz": peak_bin * bin_hz,
+        "peak_amplitude": abs(spectrum[peak_bin]) * 4.0 / n,
+        "low_band": bands["low_band"] / total,
+        "mid_band": bands["mid_band"] / total,
+        "high_band": bands["high_band"] / total,
     }
+
+
+def _reported_features(features):
+    return {name: round(value, 2 if name == "dominant_hz" else 4) for name, value in features.items()}
+
+
+def analyze(values, sample_rate_hz):
+    return _reported_features(_spectrum_features(values, sample_rate_hz))
 
 
 def classify_fault(features, rotation_hz):
@@ -116,6 +124,6 @@ def classify_fault(features, rotation_hz):
 
 
 def diagnose(values, sample_rate_hz, rotation_hz):
-    features = analyze(values, sample_rate_hz)
-    features["fault"] = classify_fault(features, rotation_hz)
-    return features
+    features = _spectrum_features(values, sample_rate_hz)
+    fault = classify_fault(features, rotation_hz)
+    return {**_reported_features(features), "fault": fault}

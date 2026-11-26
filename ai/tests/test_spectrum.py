@@ -41,6 +41,32 @@ class SpectrumTest(unittest.TestCase):
         result = spectrum.diagnose([0.0] * N, RATE, 25.0)
         self.assertEqual(result["fault"], "normal")
 
+    def test_fault_uses_band_energy_before_reporting_precision(self):
+        for hz, band, threshold, fault in (
+            (128, "high_band", 0.25, "bearing_wear"),
+            (4, "low_band", 0.5, "looseness"),
+        ):
+            for delta, expected in ((-0.00003, "normal"), (0.00003, fault)):
+                with self.subTest(band=band, delta=delta):
+                    fraction = threshold + delta
+                    amplitude = math.sqrt(fraction / (1 - fraction))
+                    values = [base + component for base, component in zip(
+                        tone(32, rate=N), tone(hz, amplitude, rate=N)
+                    )]
+                    result = spectrum.diagnose(values, N, 0)
+                    self.assertEqual(result[band], threshold)
+                    self.assertEqual(result["fault"], expected)
+
+    def test_fault_uses_fft_bin_frequency_before_reporting_precision(self):
+        values = tone(25 * RATE / N)
+        for rotation, expected in ((30.515, "imbalance"), (20.344, "normal")):
+            with self.subTest(rotation=rotation):
+                result = spectrum.diagnose(values, RATE, rotation)
+                self.assertEqual(result["dominant_hz"], 24.41)
+                self.assertEqual(result["fault"], expected)
+                self.assertEqual({key: value for key, value in result.items() if key != "fault"},
+                                 spectrum.analyze(values, RATE))
+
     def test_rejects_short_series(self):
         with self.assertRaises(ValueError):
             spectrum.analyze([1.0, 2.0, 3.0], RATE)
