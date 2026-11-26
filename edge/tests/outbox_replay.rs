@@ -106,6 +106,14 @@ fn incomplete_or_invalid_success_headers_keep_cache() {
         b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n".to_vec(),
         b"HTTP/1.1 +200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
         b"HTTP/1.1 0200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        "HTTP/1.1\u{00a0}200 OK\r\nContent-Length: 0\r\n\r\n"
+            .as_bytes()
+            .to_vec(),
+        "HTTP/1.1 200\u{2003}OK\r\nContent-Length: 0\r\n\r\n"
+            .as_bytes()
+            .to_vec(),
+        b"HTTP/1.1\t200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        b" HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
         [b"HTTP/1.1 200 OK\r\nX-Padding: ".as_slice(), &[b'x'; 8192]].concat(),
     ];
     for response in responses {

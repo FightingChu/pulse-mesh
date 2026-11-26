@@ -209,16 +209,16 @@ fn read_http_success(stream: &mut impl Read) -> bool {
             let Ok(status_line) = std::str::from_utf8(&header[..line_end]) else {
                 return false;
             };
-            let mut parts = status_line.split_whitespace();
-            match (
-                parts.next(),
-                parts
-                    .next()
-                    .filter(|code| {
-                        code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_digit())
-                    })
-                    .and_then(|code| code.parse::<u16>().ok()),
-            ) {
+            let mut parts = status_line.splitn(3, ' ');
+            let version = parts.next();
+            let status = parts
+                .next()
+                .filter(|code| code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_digit()))
+                .and_then(|code| code.parse::<u16>().ok());
+            if parts.next().is_none() {
+                return false;
+            }
+            match (version, status) {
                 (Some("HTTP/1.1" | "HTTP/1.0"), Some(100 | 102..=199)) => {
                     header_start = header_end;
                 }
@@ -433,6 +433,50 @@ mod tests {
         let mut response = b"HTTP/1.1 200 OK\r\nContent-Length: 9000\r\n\r\n".to_vec();
         response.extend_from_slice(&[b'x'; 9000]);
         assert!(read_http_success(&mut Cursor::new(response)));
+    }
+
+    #[test]
+    fn response_status_fields_require_ascii_space_separators() {
+        for status_line in [
+            "HTTP/1.1\u{00a0}200 OK",
+            "HTTP/1.1\u{2003}200 OK",
+            "HTTP/1.1\t200 OK",
+            "HTTP/1.1 200\u{00a0}OK",
+            "HTTP/1.1 200\tOK",
+            " HTTP/1.1 200 OK",
+            "HTTP/1.1  200 OK",
+            "HTTP/1.1 200",
+        ] {
+            let response = format!("{status_line}\r\nContent-Length: 0\r\n\r\n");
+            for prefix in ["", "HTTP/1.1 103 Early Hints\r\n\r\n"] {
+                let wire = format!("{prefix}{response}");
+                for split in 0..=wire.len() {
+                    let mut stream = Cursor::new(&wire.as_bytes()[..split])
+                        .chain(Cursor::new(&wire.as_bytes()[split..]));
+                    assert!(
+                        !read_http_success(&mut stream),
+                        "accepted malformed status {status_line:?}, prefix={prefix:?}, split={split}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn response_status_reason_does_not_change_success() {
+        for status_line in [
+            "HTTP/1.0 200 OK",
+            "HTTP/1.1 201 Created successfully",
+            "HTTP/1.1 204 ",
+            "HTTP/1.1 200 OK\twith detail",
+            "HTTP/1.1 200 已接收\u{00a0}正常",
+        ] {
+            let response = format!("{status_line}\r\nContent-Length: 0\r\n\r\n");
+            assert!(
+                read_http_success(&mut Cursor::new(response)),
+                "{status_line:?}"
+            );
+        }
     }
 
     #[test]
