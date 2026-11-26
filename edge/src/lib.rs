@@ -325,6 +325,17 @@ pub fn append_cache_to(path: &Path, route: &str, body: &str) -> io::Result<()> {
             "offline cache limit reached",
         ));
     }
+    if start > 0 {
+        file.seek(std::io::SeekFrom::End(-1))?;
+        let mut last_byte = [0u8; 1];
+        file.read_exact(&mut last_byte)?;
+        if last_byte[0] != b'\n' {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "offline cache has an unterminated record; replay or recover it before appending",
+            ));
+        }
+    }
     file.seek(std::io::SeekFrom::End(0))?;
     if let Err(write_error) = file.write_all(&record).and_then(|()| file.sync_data()) {
         let rollback_error = file.set_len(start).and_then(|()| file.sync_data());

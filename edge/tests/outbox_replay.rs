@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use pulse_edge::{append_cache, flush_cache, read_cache, Sample, SAMPLE_PATH};
+use pulse_edge::{
+    append_cache, append_cache_to, flush_cache, read_cache, Sample, BATCH_PATH, DIAGNOSE_PATH,
+    SAMPLE_PATH,
+};
 
 struct TestCache(PathBuf);
 
@@ -244,4 +247,79 @@ fn escaped_sample_strings_replay_as_one_unchanged_record() {
     worker.join().unwrap();
     assert_eq!(acknowledged, 1);
     assert!(!cache.path().exists());
+}
+
+#[test]
+fn appending_after_unterminated_record_keeps_cache_unchanged() {
+    for tail in [
+        b"/api/v1/samples\t{\"event_id\":\"partial".as_slice(),
+        b"/api/v1/samples\t{\"event_id\":\"complete\"}".as_slice(),
+        b"{\"event_id\":\"legacy\"}".as_slice(),
+        b"/api/v1/diagnose\t{\"device_id\":\"\xe7".as_slice(),
+        b"\r".as_slice(),
+    ] {
+        for prefix in [
+            b"".as_slice(),
+            b"/api/v1/samples\t{\"event_id\":\"saved\"}\n".as_slice(),
+        ] {
+            for route in [SAMPLE_PATH, BATCH_PATH, DIAGNOSE_PATH] {
+                let cache = TestCache::new();
+                let original = [prefix, tail].concat();
+                fs::write(cache.path(), &original).unwrap();
+                let result = append_cache_to(cache.path(), route, r#"{"event_id":"next"}"#);
+                assert!(
+                    result.is_err(),
+                    "accepted unterminated tail {tail:?} for {route}"
+                );
+                assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+                assert_eq!(fs::read(cache.path()).unwrap(), original);
+            }
+        }
+    }
+}
+
+#[test]
+fn appending_after_complete_line_preserves_record_boundaries() {
+    for original in [
+        b"".as_slice(),
+        b"{\"event_id\":\"legacy\"}\n".as_slice(),
+        b"/api/v1/samples\t{\"event_id\":\"saved\"}\r\n".as_slice(),
+    ] {
+        let cache = TestCache::new();
+        fs::write(cache.path(), original).unwrap();
+        let body = r#"{"event_id":"next"}"#;
+        append_cache(cache.path(), body).unwrap();
+        let appended = format!("{SAMPLE_PATH}\t{body}\n");
+        assert_eq!(
+            fs::read(cache.path()).unwrap(),
+            [original, appended.as_bytes()].concat()
+        );
+    }
+}
+
+#[test]
+fn complete_unterminated_record_can_be_acknowledged_before_appending() {
+    for prefix in ["", "/api/v1/samples\t"] {
+        let cache = TestCache::new();
+        let body = r#"{"event_id":"complete-tail"}"#;
+        fs::write(cache.path(), format!("{prefix}{body}")).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(read_request(&mut stream), body);
+            stream
+                .write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+        });
+        let acknowledged = flush_cache(&address, cache.path());
+        worker.join().unwrap();
+        assert_eq!(acknowledged, 1);
+        assert!(!cache.path().exists());
+        append_cache(cache.path(), r#"{"event_id":"new-reading"}"#).unwrap();
+        assert_eq!(
+            read_cache(cache.path()).unwrap(),
+            vec![format!("{SAMPLE_PATH}\t{{\"event_id\":\"new-reading\"}}")]
+        );
+    }
 }
