@@ -122,6 +122,10 @@ int main() {
   const double constant[] = {3.0, 3.0, 3.0, 3.0};
   expect_near("rms constant", compute_rms(constant, 4), 3.0, 1e-9);
   expect_near("rms empty", compute_rms(nullptr, 0), 0.0, 1e-9);
+  if (!std::isnan(compute_rms(nullptr, 1))) {
+    std::printf("FAIL null RMS input was not rejected\n");
+    failures++;
+  }
   for (double magnitude : {1e308, std::numeric_limits<double>::max(), 1e-300,
                            std::numeric_limits<double>::denorm_min()}) {
     const double extreme[] = {magnitude, -magnitude, magnitude, -magnitude};

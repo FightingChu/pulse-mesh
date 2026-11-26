@@ -130,6 +130,7 @@ void fft_radix2_impl(float* re, float* im, std::size_t n, float* twiddle_real,
 
 double compute_rms(const double* v, std::size_t n) {
   if (n == 0) return 0.0;
+  if (v == nullptr) return std::numeric_limits<double>::quiet_NaN();
   double scale = 0.0;
   for (std::size_t index = 0; index < n; index++) {
     if (!std::isfinite(v[index])) return std::numeric_limits<double>::quiet_NaN();
