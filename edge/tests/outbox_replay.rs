@@ -122,6 +122,8 @@ fn incomplete_or_invalid_success_headers_keep_cache() {
         b"HTTP/1.1 200 OK\rdetail\r\nContent-Length: 0\r\n\r\n".to_vec(),
         b"HTTP/1.1 200 OK\x7fdetail\r\nContent-Length: 0\r\n\r\n".to_vec(),
         b"HTTP/1.1 103 Early\0Hints\r\n\r\nHTTP/1.1 200 OK\r\n\r\n".to_vec(),
+        b"HTTP/1.\xff 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        b"HTTP/1.1 2\xff0 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
         [b"HTTP/1.1 200 OK\r\nX-Padding: ".as_slice(), &[b'x'; 8192]].concat(),
     ];
     for response in responses {
@@ -142,6 +144,29 @@ fn incomplete_or_invalid_success_headers_keep_cache() {
             read_cache(cache.path()).unwrap(),
             vec![format!("{SAMPLE_PATH}\t{body}")]
         );
+    }
+}
+
+#[test]
+fn opaque_status_reasons_allow_successful_cache_replay() {
+    for response in [
+        b"HTTP/1.1 201 Re\xe7u\r\nContent-Length: 0\r\n\r\n".as_slice(),
+        b"HTTP/1.1 103 \xff\r\n\r\nHTTP/1.1 200 Re\xe7u\r\nContent-Length: 0\r\n\r\n".as_slice(),
+    ] {
+        let cache = TestCache::new();
+        let body = r#"{"event_id":"opaque-reason"}"#;
+        append_cache(cache.path(), body).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(read_request(&mut stream), body);
+            stream.write_all(response).unwrap();
+        });
+        let acknowledged = flush_cache(&address, cache.path());
+        worker.join().unwrap();
+        assert_eq!(acknowledged, 1, "response {response:?}");
+        assert!(!cache.path().exists());
     }
 }
 

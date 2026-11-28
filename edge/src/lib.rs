@@ -193,7 +193,7 @@ pub fn forward_to(addr: &str, path: &str, body: &str) -> bool {
 }
 
 fn read_http_success(stream: &mut impl Read) -> bool {
-    let mut response = Vec::with_capacity(256);
+    let mut response: Vec<u8> = Vec::with_capacity(256);
     let mut chunk = [0u8; 256];
     let mut header_start = 0;
     loop {
@@ -206,27 +206,24 @@ fn read_http_success(stream: &mut impl Read) -> bool {
             let Some(line_end) = header.windows(2).position(|window| window == b"\r\n") else {
                 return false;
             };
-            let Ok(status_line) = std::str::from_utf8(&header[..line_end]) else {
-                return false;
-            };
-            let mut parts = status_line.splitn(3, ' ');
+            let mut parts = header[..line_end].splitn(3, |byte| *byte == b' ');
             let version = parts.next();
             let status = parts
                 .next()
-                .filter(|code| code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_digit()))
-                .and_then(|code| code.parse::<u16>().ok());
+                .filter(|code| code.len() == 3 && code.iter().all(|byte| byte.is_ascii_digit()))
+                .and_then(|code| std::str::from_utf8(code).ok()?.parse::<u16>().ok());
             if parts.next().is_none_or(|reason| {
                 reason
-                    .bytes()
-                    .any(|byte| byte.is_ascii_control() && byte != b'\t')
+                    .iter()
+                    .any(|byte| byte.is_ascii_control() && *byte != b'\t')
             }) {
                 return false;
             }
             match (version, status) {
-                (Some("HTTP/1.1" | "HTTP/1.0"), Some(100 | 102..=199)) => {
+                (Some(b"HTTP/1.1" | b"HTTP/1.0"), Some(100 | 102..=199)) => {
                     header_start = header_end;
                 }
-                (Some("HTTP/1.1" | "HTTP/1.0"), Some(200..=299)) => return true,
+                (Some(b"HTTP/1.1" | b"HTTP/1.0"), Some(200..=299)) => return true,
                 _ => return false,
             }
         }
@@ -519,6 +516,40 @@ mod tests {
                         !read_http_success(&mut stream),
                         "accepted control byte {control:#04x}, response={response:?}, split={split}"
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn response_status_reasons_accept_opaque_high_bytes() {
+        for octet in 0x80u8..=0xff {
+            for (status, expected) in [
+                (200, true),
+                (201, true),
+                (204, true),
+                (400, false),
+                (503, false),
+            ] {
+                let final_response = [
+                    format!("HTTP/1.1 {status} ").as_bytes(),
+                    &[octet],
+                    b"\r\nContent-Length: 0\r\n\r\n",
+                ]
+                .concat();
+                let interim = [b"HTTP/1.1 103 ".as_slice(), &[octet], b"\r\n\r\n"].concat();
+                for prefix in [b"".as_slice(), interim.as_slice()] {
+                    let response = [prefix, final_response.as_slice()].concat();
+                    for split in 0..=response.len() {
+                        let mut stream =
+                            Cursor::new(&response[..split]).chain(Cursor::new(&response[split..]));
+                        assert_eq!(
+                            read_http_success(&mut stream),
+                            expected,
+                            "reason octet {octet:#04x}, status={status}, interim={}, split={split}",
+                            !prefix.is_empty()
+                        );
+                    }
                 }
             }
         }
