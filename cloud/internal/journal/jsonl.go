@@ -66,7 +66,10 @@ func RepairIncompleteTail(file *os.File) (bool, error) {
 
 func repairTailRecord(file *os.File, start, size int64) (bool, error) {
 	tailLength := size - start
-	if tailLength > 0 && tailLength <= maxJournalRecordBytes {
+	if tailLength > maxJournalRecordBytes {
+		return false, fmt.Errorf("journal tail exceeds %d-byte validation limit", maxJournalRecordBytes)
+	}
+	if tailLength > 0 {
 		tail := make([]byte, int(tailLength))
 		if _, err := file.ReadAt(tail, start); err != nil {
 			return false, err

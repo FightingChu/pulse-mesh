@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,53 @@ import (
 	"pulse-mesh/cloud/internal/diagnose"
 	"pulse-mesh/cloud/internal/ingest"
 )
+
+func TestStoresRejectOversizedTailWithoutLosingData(t *testing.T) {
+	for _, scenario := range []struct {
+		name string
+		open func(string) error
+	}{
+		{"samples", func(path string) error {
+			store, err := ingest.OpenStore(path)
+			if err == nil {
+				defer store.Close()
+			}
+			return err
+		}},
+		{"diagnoses", func(path string) error {
+			store, err := diagnose.OpenStore(path, 10)
+			if err == nil {
+				defer store.Close()
+			}
+			return err
+		}},
+		{"alerts", func(path string) error {
+			store, err := alerts.OpenStore(path, time.Minute)
+			if err == nil {
+				defer store.Close()
+			}
+			return err
+		}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), scenario.name+".jsonl")
+			original := []byte(`{"padding":"` + strings.Repeat("x", 2*1024*1024) + `"}`)
+			if err := os.WriteFile(path, original, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := scenario.open(path); err == nil {
+				t.Error("store opened successfully after an unvalidated oversized tail")
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(content, original) {
+				t.Errorf("store initialization changed journal: got %d bytes, want %d", len(content), len(original))
+			}
+		})
+	}
+}
 
 func omitFinalDelimiter(t *testing.T, path string) {
 	t.Helper()
