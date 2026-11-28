@@ -201,21 +201,28 @@ Spectrum analyze_spectrum(const double* samples, std::size_t n, double sample_ra
     return out;
   }
 
+  double minimum = samples[0];
+  double maximum = samples[0];
+  for (std::size_t index = 0; index < n; index++) {
+    if (!std::isfinite(samples[index])) return out;
+    if (samples[index] < minimum) minimum = samples[index];
+    if (samples[index] > maximum) maximum = samples[index];
+  }
+  const double offset = minimum / 2.0 + maximum / 2.0;
   double mean = 0.0;
-  for (std::size_t i = 0; i < n; i++) {
-    if (!std::isfinite(samples[i])) return out;
-    mean += (samples[i] - mean) / (double)(i + 1);
+  for (std::size_t index = 0; index < n; index++) {
+    mean += ((samples[index] - offset) - mean) / (double)(index + 1);
   }
   const double float_limit = (double)std::numeric_limits<float>::max();
   double scale = 0.0;
   for (std::size_t index = 0; index < n; index++) {
-    const double centered = samples[index] - mean;
+    const double centered = (samples[index] - offset) - mean;
     if (!std::isfinite(centered) || std::fabs(centered) > float_limit) return out;
     if (std::fabs(centered) > scale) scale = std::fabs(centered);
   }
   if (scale == 0.0) return out;
   for (std::size_t index = 0; index < n; index++) {
-    workspace.real[index] = (float)((samples[index] - mean) / scale);
+    workspace.real[index] = (float)(((samples[index] - offset) - mean) / scale);
     workspace.imaginary[index] = 0.0f;
   }
 

@@ -262,6 +262,50 @@ int main() {
   expect_near("large DC offset dominant", biased.dominant_hz, 25.0, 2.0);
   expect_near("large DC offset amplitude", biased.peak_amplitude, 1.0, 0.1);
 
+  const double offset_cycles[][4] = {
+      {2.0, -2.0, 2.0, -2.0},
+      {2.0, 0.0, -2.0, 0.0},
+      {2.0, 0.0, 0.0, 0.0},
+  };
+  for (std::size_t size : {64, 1024}) {
+    for (const auto& cycle : offset_cycles) {
+      std::vector<double> reference(size);
+      for (std::size_t index = 0; index < size; index++) {
+        reference[index] = cycle[index % 4];
+      }
+      const Spectrum expected = analyze_spectrum(reference.data(), size, 1000.0);
+      for (double offset : {-1e16, 1e16}) {
+        std::vector<double> shifted(size);
+        bool input_preserved = true;
+        for (std::size_t index = 0; index < size; index++) {
+          shifted[index] = offset + reference[index];
+          if (shifted[index] - offset != reference[index]) input_preserved = false;
+        }
+        expect_near("DC regression input retained", input_preserved ? 1.0 : 0.0, 1.0, 0.0);
+        for (bool reuse_workspace : {false, true}) {
+          const Spectrum actual = reuse_workspace
+              ? analyze_spectrum(shifted.data(), size, 1000.0, workspace)
+              : analyze_spectrum(shifted.data(), size, 1000.0);
+          expect_near("DC invariant dominant frequency", actual.dominant_hz, expected.dominant_hz, 1e-6);
+          expect_near("DC invariant peak amplitude", actual.peak_amplitude, expected.peak_amplitude, 1e-5);
+          expect_near("DC invariant low band", actual.low_band, expected.low_band, 1e-5);
+          expect_near("DC invariant mid band", actual.mid_band, expected.mid_band, 1e-5);
+          expect_near("DC invariant high band", actual.high_band, expected.high_band, 1e-5);
+          expect_str("DC invariant fault", classify_fault(actual, 25.0), classify_fault(expected, 25.0));
+        }
+      }
+    }
+  }
+  for (double offset : {-std::numeric_limits<double>::max(), std::numeric_limits<double>::max()}) {
+    const std::vector<double> flat(1024, offset);
+    const Spectrum actual = analyze_spectrum(flat.data(), flat.size(), 1000.0, workspace);
+    expect_near("finite extreme DC frequency", actual.dominant_hz, 0.0, 0.0);
+    expect_near("finite extreme DC amplitude", actual.peak_amplitude, 0.0, 0.0);
+    expect_near("finite extreme DC low band", actual.low_band, 0.0, 0.0);
+    expect_near("finite extreme DC mid band", actual.mid_band, 0.0, 0.0);
+    expect_near("finite extreme DC high band", actual.high_band, 0.0, 0.0);
+  }
+
   std::vector<double> doubled(1024);
   for (std::size_t i = 0; i < doubled.size(); i++) {
     doubled[i] = std::sin(2.0 * 3.14159265358979323846 * 50.0 * (double)i / 1000.0);
