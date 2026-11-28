@@ -215,7 +215,11 @@ fn read_http_success(stream: &mut impl Read) -> bool {
                 .next()
                 .filter(|code| code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_digit()))
                 .and_then(|code| code.parse::<u16>().ok());
-            if parts.next().is_none() {
+            if parts.next().is_none_or(|reason| {
+                reason
+                    .bytes()
+                    .any(|byte| byte.is_ascii_control() && byte != b'\t')
+            }) {
                 return false;
             }
             match (version, status) {
@@ -487,6 +491,33 @@ mod tests {
                     assert!(
                         !read_http_success(&mut stream),
                         "accepted malformed status {status_line:?}, prefix={prefix:?}, split={split}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn response_status_reason_rejects_control_bytes() {
+        for control in (0u8..=31).chain(std::iter::once(127)) {
+            if control == b'\t' {
+                continue;
+            }
+            let status_line = format!("HTTP/1.1 200 OK{}detail\r\n\r\n", char::from(control));
+            for response in [
+                status_line.clone(),
+                format!(
+                    "HTTP/1.1 103 Early{0}Hints\r\n\r\nHTTP/1.1 200 OK\r\n\r\n",
+                    char::from(control)
+                ),
+                format!("HTTP/1.1 103 Early Hints\r\n\r\n{status_line}"),
+            ] {
+                for split in 0..=response.len() {
+                    let mut stream = Cursor::new(&response.as_bytes()[..split])
+                        .chain(Cursor::new(&response.as_bytes()[split..]));
+                    assert!(
+                        !read_http_success(&mut stream),
+                        "accepted control byte {control:#04x}, response={response:?}, split={split}"
                     );
                 }
             }

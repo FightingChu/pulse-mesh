@@ -117,6 +117,11 @@ fn incomplete_or_invalid_success_headers_keep_cache() {
             .to_vec(),
         b"HTTP/1.1\t200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
         b" HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        b"HTTP/1.1 200 OK\0detail\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        b"HTTP/1.1 200 OK\ndetail\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        b"HTTP/1.1 200 OK\rdetail\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        b"HTTP/1.1 200 OK\x7fdetail\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        b"HTTP/1.1 103 Early\0Hints\r\n\r\nHTTP/1.1 200 OK\r\n\r\n".to_vec(),
         [b"HTTP/1.1 200 OK\r\nX-Padding: ".as_slice(), &[b'x'; 8192]].concat(),
     ];
     for response in responses {
