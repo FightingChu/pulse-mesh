@@ -94,6 +94,36 @@ class AssessTest(unittest.TestCase):
                     self.assertTrue(math.isfinite(result["rms"]))
                     self.assertEqual(result["level"], "critical")
 
+    def test_representable_offsets_preserve_anomaly_scores(self):
+        history = [-2.0, 0.0, 2.0, 0.0]
+        for value, level in ((4.0, "normal"), (6.0, "warning"), (10.0, "critical"), (-6.0, "warning")):
+            for offset in (-1e16, 1e16):
+                with self.subTest(value=value, offset=offset):
+                    shifted = [offset + item for item in history + [value]]
+                    self.assertEqual([item - offset for item in shifted], history + [value])
+                    expected = value / math.sqrt(2.0)
+                    self.assertAlmostEqual(main.zscore(shifted[-1], shifted[:-1]), expected, places=12)
+                    result = main.assess("motor-01", "vibration_rms", shifted)
+                    self.assertEqual(result["z"], round(expected, 3))
+                    self.assertEqual(result["level"], level)
+                    self.assertEqual(result["last"], shifted[-1])
+                    self.assertTrue(math.isfinite(result["rms"]))
+
+    def test_opposite_large_reading_preserves_finite_score(self):
+        for minimum in (5e307, 8e307):
+            with self.subTest(minimum=minimum):
+                history = [1e308, 1e308, minimum]
+                value = -1e308
+                with localcontext() as context:
+                    context.prec = 80
+                    numbers = [Decimal.from_float(item) for item in history]
+                    mean = sum(numbers) / len(numbers)
+                    deviation = (sum((item - mean) ** 2 for item in numbers) / len(numbers)).sqrt()
+                    expected = float((Decimal.from_float(value) - mean) / deviation)
+                result = main.assess("motor-01", "vibration_rms", history + [value])
+                self.assertEqual(result["z"], round(expected, 3))
+                self.assertEqual(result["level"], "critical")
+
     def test_diagnose_rejects_non_numeric_frequencies(self):
         for field in ("sample_rate_hz", "rotation_hz"):
             for invalid in (True, False, None, "1000", [], {}, 10**400, float("inf"), float("nan")):

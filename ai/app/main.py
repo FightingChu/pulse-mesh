@@ -32,6 +32,10 @@ def baseline(values):
 def zscore(value, history):
     if len(history) < MIN_HISTORY:
         return 0.0
+    offset = min(history) / 2.0 + max(history) / 2.0
+    if math.isfinite(value - offset):
+        value -= offset
+        history = [item - offset for item in history]
     scale = max(abs(value), *(abs(item) for item in history))
     if scale == 0.0:
         return 0.0

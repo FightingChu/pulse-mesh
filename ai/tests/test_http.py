@@ -522,6 +522,23 @@ class HTTPTest(unittest.TestCase):
                 self.assertAlmostEqual(payload["z"] / (spike / 1e100), 1.0, places=12)
                 self.assertTrue(math.isfinite(payload["rms"]))
 
+    def test_post_assess_preserves_levels_with_large_baselines(self):
+        for offset in (-1e16, 1e16):
+            for value, level in ((4.0, "normal"), (6.0, "warning"), (10.0, "critical")):
+                with self.subTest(offset=offset, value=value):
+                    values = [offset + item for item in (-2.0, 0.0, 2.0, 0.0, value)]
+                    request = urllib.request.Request(
+                        self.base + "/assess",
+                        data=json.dumps({"device_id": "motor-01", "values": values}, allow_nan=False).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with urllib.request.urlopen(request, timeout=5) as response:
+                        self.assertEqual(response.status, 200)
+                        payload = json.load(response, parse_constant=lambda item: self.fail(item))
+                    self.assertEqual(payload["z"], round(value / math.sqrt(2.0), 3))
+                    self.assertEqual(payload["level"], level)
+                    self.assertEqual(payload["last"], values[-1])
+
     def test_post_rejects_invalid_sample_types(self):
         invalid_values = [None, False, 0, "", {}, {"0": 0}]
         invalid_values.extend(
