@@ -226,6 +226,9 @@ func validateResult(req Request, result Result) error {
 	if result.DominantHz < 0 || result.PeakAmplitude < 0 || result.LowBand < 0 || result.MidBand < 0 || result.HighBand < 0 {
 		return fmt.Errorf("negative spectrum feature")
 	}
+	if result.LowBand > 1 || result.MidBand > 1 || result.HighBand > 1 {
+		return fmt.Errorf("band energy ratios must be between 0 and 1")
+	}
 	bandTotal := result.LowBand + result.MidBand + result.HighBand
 	if bandTotal > 1.05 {
 		return fmt.Errorf("band energy ratios sum to %.4f", bandTotal)

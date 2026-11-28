@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -119,6 +120,61 @@ func TestDiagnoseRejectsOversizedResponse(t *testing.T) {
 	request := diagnose.Request{EventID: "boot-1-spectrum-0", DeviceID: "motor-01", Values: []float64{1}}
 	if _, err := client.Diagnose(context.Background(), request); err == nil {
 		t.Fatal("expected oversized response rejection")
+	}
+}
+
+func TestDiagnoseBoundsIndividualBandRatios(t *testing.T) {
+	for _, band := range []string{"low_band", "mid_band", "high_band"} {
+		for _, ratio := range []float64{-0.0001, 0, 0.5, 1, math.Nextafter(1, 2), 1.04} {
+			payload := map[string]any{
+				"device_id": "motor-01", "event_id": "band-range", "fault": "normal",
+				"dominant_hz": 0, "peak_amplitude": 0,
+				"low_band": 0, "mid_band": 0, "high_band": 0,
+			}
+			payload[band] = ratio
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				_ = json.NewEncoder(writer).Encode(payload)
+			}))
+			client := diagnose.NewClient(server.URL)
+			result, err := client.Diagnose(context.Background(), diagnose.Request{
+				DeviceID: "motor-01", EventID: "band-range", Values: []float64{0},
+			})
+			server.Close()
+			if ratio < 0 || ratio > 1 {
+				if err == nil {
+					t.Errorf("accepted %s=%v: %+v", band, ratio, result)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatalf("rejected valid %s=%v: %v", band, ratio, err)
+			}
+			actual := map[string]float64{"low_band": result.LowBand, "mid_band": result.MidBand, "high_band": result.HighBand}
+			if actual[band] != ratio {
+				t.Errorf("changed %s=%v to %v", band, ratio, actual[band])
+			}
+		}
+	}
+}
+
+func TestDiagnosePreservesRoundedBandTotalTolerance(t *testing.T) {
+	want := diagnose.Result{
+		DeviceID: "motor-01", Fault: "bearing_wear",
+		DominantHz: 120, PeakAmplitude: 0.6,
+		LowBand: 0.3334, MidBand: 0.3334, HighBand: 0.3333,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewEncoder(writer).Encode(want)
+	}))
+	defer server.Close()
+	result, err := diagnose.NewClient(server.URL).Diagnose(context.Background(), diagnose.Request{
+		DeviceID: "motor-01", Values: []float64{0},
+	})
+	if err != nil {
+		t.Fatalf("rounded band sum was rejected: %v", err)
+	}
+	if result.LowBand != want.LowBand || result.MidBand != want.MidBand || result.HighBand != want.HighBand {
+		t.Fatalf("rounded bands changed: %+v", result)
 	}
 }
 

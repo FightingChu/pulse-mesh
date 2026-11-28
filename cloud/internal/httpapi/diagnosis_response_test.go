@@ -74,3 +74,49 @@ func TestDiagnosisRejectsInvalidAIFeaturesBeforeSideEffects(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnosisRejectsOutOfRangeAIBandsBeforeSideEffects(t *testing.T) {
+	for _, band := range []string{"low_band", "mid_band", "high_band"} {
+		t.Run(band, func(t *testing.T) {
+			payload := map[string]any{
+				"device_id": "motor-01", "event_id": "invalid-band", "fault": "bearing_wear",
+				"dominant_hz": 120.0, "peak_amplitude": 0.6,
+				"low_band": 0.0, "mid_band": 0.0, "high_band": 0.0,
+			}
+			payload[band] = 1.04
+			var aiCalls atomic.Int32
+			ai := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				aiCalls.Add(1)
+				writeJSON(writer, payload)
+			}))
+			defer ai.Close()
+			store := diagnose.NewStore(10)
+			engine := alerts.New(time.Minute)
+			client := diagnose.NewClientWithBreaker(ai.URL, time.Second, 1, time.Minute)
+			handler := httpapi.New(ingest.NewStore(), engine, client, store)
+			body, err := json.Marshal(diagnose.Request{
+				DeviceID: "motor-01", EventID: "invalid-band", Values: make([]float64, 1024),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable} {
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/diagnose", bytes.NewReader(body)))
+				if response.Code != status {
+					t.Errorf("invalid AI band: status=%d body=%s, want %d", response.Code, response.Body.String(), status)
+				}
+				var result map[string]any
+				if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if result["error"] == nil {
+					t.Error("missing JSON upstream error")
+				}
+			}
+			if aiCalls.Load() != 1 || store.Count() != 0 || len(engine.List("", true)) != 0 {
+				t.Errorf("invalid AI band caused side effects: AI=%d diagnoses=%d alerts=%d", aiCalls.Load(), store.Count(), len(engine.List("", true)))
+			}
+		})
+	}
+}
