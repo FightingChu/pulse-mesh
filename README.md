@@ -1,3 +1,11 @@
+## 赞助 / Sponsor
+
+<a href="https://www.apophiscode.com"><img src="https://www.apophiscode.com/brand/apophiscode-logo.png" alt="ApophisCode" height="48"></a>
+
+本项目的 AI 能力由 [ApophisCode](https://www.apophiscode.com) 种子计划赞助。ApophisCode 提供稳定的主流大模型 API 接入。
+
+This project is sponsored by the [ApophisCode](https://www.apophiscode.com) Seed Program.
+
 # PulseMesh - 工业巡检边缘 AI 平台
 
 工业设备健康监测：振动 / 温度 / 电流 -> 边缘判断 -> 云端聚合 -> 手机告警。
