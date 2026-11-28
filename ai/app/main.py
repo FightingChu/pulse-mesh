@@ -127,11 +127,12 @@ class H(BaseHTTPRequestHandler):
                 raise ValueError('GET requests must not contain a body')
             if content_lengths and _parse_content_length(content_lengths[0]) != 0:
                 raise ValueError('GET requests must not contain a body')
+            path = urlparse(self.path).path
         except ValueError as exc:
             self.close_connection = True
             self._send({'error': str(exc)}, 400)
             return
-        if urlparse(self.path).path in ('/health', '/health/live'):
+        if path in ('/health', '/health/live'):
             self._send({'status': 'ok'})
         else:
             self._send({'error': 'not found'}, 404)

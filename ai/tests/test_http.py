@@ -316,6 +316,52 @@ class HTTPTest(unittest.TestCase):
                         self.assertEqual(payload, {"status": "ok"} if status == 200 else {"error": "not found"})
                     self.assertIs(connection.sock, original_socket)
 
+    def test_malformed_get_targets_return_json_error_and_close(self):
+        embedded_request = (
+            b"POST /assess HTTP/1.1\r\nHost: localhost\r\n"
+            b"Content-Length: 2\r\nConnection: close\r\n\r\n{}"
+        )
+        for target in (b"http://[/health", b"http://[not-ip]/health", b"http://[::1/health"):
+            with self.subTest(target=target):
+                output = io.StringIO()
+                with patch.object(main.sys, "stderr", output):
+                    with patch.object(main, "assess", wraps=main.assess) as analyze:
+                        with socket.create_connection(self.server.server_address, timeout=5) as client:
+                            client.sendall(b"GET " + target + b" HTTP/1.1\r\nHost: localhost\r\n\r\n" + embedded_request)
+                            chunks = []
+                            while chunk := client.recv(4096):
+                                chunks.append(chunk)
+                        response = b"".join(chunks)
+                        self.assertTrue(response.startswith(b"HTTP/1.1 400 "), response)
+                        self.assertEqual(response.count(b"HTTP/1.1 "), 1, response)
+                        headers, body = response.split(b"\r\n\r\n", 1)
+                        self.assertIn(b"Content-Type: application/json", headers)
+                        self.assertIn(("Content-Length: %d\r\n" % len(body)).encode(), headers + b"\r\n")
+                        self.assertIn("error", json.loads(body))
+                        analyze.assert_not_called()
+                self.assertNotIn("Traceback", output.getvalue())
+        with urllib.request.urlopen(self.base + "/health", timeout=5) as response:
+            self.assertEqual(response.status, 200)
+
+    def test_get_routing_preserves_absolute_targets_and_queries(self):
+        connection = HTTPConnection(*self.server.server_address, timeout=5)
+        self.addCleanup(connection.close)
+        connection.connect()
+        original_socket = connection.sock
+        for target, status in (
+            ("/health?probe=1", 200),
+            ("http://localhost/health/live?probe=1", 200),
+            ("http://[::1]/health", 200),
+            ("http://localhost/unknown?probe=1", 404),
+        ):
+            with self.subTest(target=target):
+                connection.request("GET", target)
+                with connection.getresponse() as response:
+                    self.assertEqual(response.status, status)
+                    self.assertFalse(response.will_close)
+                    self.assertEqual(json.load(response), {"status": "ok"} if status == 200 else {"error": "not found"})
+                self.assertIs(connection.sock, original_socket)
+
     def test_request_control_characters_are_escaped_in_access_log(self):
         output = io.StringIO()
         with patch.dict(os.environ, {"PULSE_ACCESS_LOG": "1"}):
