@@ -51,7 +51,9 @@ def _spectrum_features(values, sample_rate_hz):
     if sample_rate_hz <= 0:
         raise ValueError("sample_rate_hz must be positive")
 
-    scale = max(abs(value) for value in values)
+    offset = min(values) / 2.0 + max(values) / 2.0
+    shifted = [value - offset for value in values]
+    scale = max(abs(value) for value in shifted)
     if scale == 0.0:
         return {
             "dominant_hz": 0.0,
@@ -60,7 +62,7 @@ def _spectrum_features(values, sample_rate_hz):
             "mid_band": 0.0,
             "high_band": 0.0,
         }
-    normalized = [value / scale for value in values]
+    normalized = [value / scale for value in shifted]
     mean = math.fsum(normalized) / n
     window = hann(n)
     prepared = [(normalized[i] - mean) * window[i] for i in range(n)]

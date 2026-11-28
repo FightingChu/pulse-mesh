@@ -438,6 +438,26 @@ class HTTPTest(unittest.TestCase):
         self.assertAlmostEqual(payload["peak_amplitude"] / 1e200, expected, delta=0.01)
         self.assertEqual(payload["fault"], "bearing_wear")
 
+    def test_post_spectrum_preserves_vibration_with_large_dc_offsets(self):
+        for offset in (-1e16, 1e16):
+            with self.subTest(offset=offset):
+                values = [offset + value for value in (2.0, 0.0, -2.0, 0.0)] * 256
+                request = urllib.request.Request(
+                    self.base + "/spectrum",
+                    data=json.dumps({"device_id": "motor-01", "values": values}, allow_nan=False).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    payload = json.load(response, parse_constant=lambda value: self.fail(value))
+                self.assertEqual(payload["device_id"], "motor-01")
+                self.assertEqual(payload["dominant_hz"], 250.0)
+                self.assertEqual(payload["peak_amplitude"], 2.0)
+                self.assertEqual(payload["low_band"], 0.0)
+                self.assertEqual(payload["mid_band"], 0.0)
+                self.assertEqual(payload["high_band"], 1.0)
+                self.assertEqual(payload["fault"], "bearing_wear")
+
     def test_post_assess_preserves_variance_with_extreme_spikes(self):
         for spike in (1e300, -1e308):
             with self.subTest(spike=spike):

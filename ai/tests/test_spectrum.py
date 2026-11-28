@@ -24,6 +24,31 @@ class SpectrumTest(unittest.TestCase):
                     self.assertEqual(result["dominant_hz"], RATE / len(cycle))
                     self.assertEqual(result["peak_amplitude"], 3.0)
 
+    def test_representable_dc_offsets_preserve_spectrum(self):
+        for size in (64, 1024):
+            for cycle in ((2.0, -2.0), (2.0, 0.0, -2.0, 0.0), (2.0, 0.0, 0.0, 0.0)):
+                values = list(cycle) * (size // len(cycle))
+                expected = spectrum.diagnose(values, RATE, 25.0)
+                for offset in (-1e16, 1e16):
+                    with self.subTest(size=size, cycle=cycle, offset=offset):
+                        shifted = [offset + value for value in values]
+                        self.assertEqual([value - offset for value in shifted], values)
+                        self.assertEqual(spectrum.diagnose(shifted, RATE, 25.0), expected)
+                        self.assertEqual(spectrum.analyze(shifted, RATE),
+                                         {key: value for key, value in expected.items() if key != "fault"})
+
+    def test_dc_offset_removal_does_not_overflow_near_float_limit(self):
+        for offset in (-1e308, 1e308):
+            with self.subTest(offset=offset):
+                amplitude = 2.0 * math.ulp(offset)
+                values = [amplitude, 0.0, -amplitude, 0.0] * (N // 4)
+                shifted = [offset + value for value in values]
+                self.assertEqual([value - offset for value in shifted], values)
+                expected = spectrum.diagnose(values, RATE, 25.0)
+                self.assertTrue(math.isfinite(expected["peak_amplitude"]))
+                self.assertAlmostEqual(expected["peak_amplitude"] / amplitude, 1.0, places=12)
+                self.assertEqual(spectrum.diagnose(shifted, RATE, 25.0), expected)
+
     def test_fft_rejects_bad_length(self):
         with self.assertRaises(ValueError):
             spectrum.fft([1.0, 2.0, 3.0])
