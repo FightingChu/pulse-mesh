@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"pulse-mesh/cloud/internal/alerts"
 	"pulse-mesh/cloud/internal/diagnose"
@@ -356,7 +358,14 @@ func writeStorageError(w http.ResponseWriter, err error, message string) {
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
-	decoder := json.NewDecoder(r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+	if !utf8.Valid(body) {
+		return errors.New("request body must be valid UTF-8")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(dst); err != nil {
 		return err
 	}

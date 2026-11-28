@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"unicode/utf8"
 
 	"pulse-mesh/cloud/internal/ingest"
 )
@@ -34,6 +35,7 @@ func FuzzDecodeJSON(f *testing.F) {
 	f.Add(`{"device_id":"motor-01","metric":"vibration_rms"}`)
 	f.Add(`{"device_id":"motor-01","metric":"vibration_rms","value":null}`)
 	f.Add(`{"device_id":"motor-01","metric":"vibration_rms","value":0}`)
+	f.Add("{\"device_id\":\"\xff\",\"metric\":\"vibration_rms\",\"value\":0}")
 	f.Add(`[]`)
 	f.Add(`{"x":1} {"y":2}`)
 	f.Add(`{"value":NaN}`)
@@ -44,6 +46,9 @@ func FuzzDecodeJSON(f *testing.F) {
 		recorder := httptest.NewRecorder()
 		var input sampleInput
 		if err := decodeJSON(recorder, request, &input); err == nil {
+			if !utf8.ValidString(body) {
+				t.Fatal("accepted invalid UTF-8 request")
+			}
 			_ = validateSample(input.Sample)
 		}
 	})
