@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 var ErrCircuitOpen = errors.New("AI diagnosis circuit is open")
@@ -172,6 +173,9 @@ func (c *Client) doDiagnose(ctx context.Context, req Request) (Result, bool, err
 		return Result{}, resp.StatusCode >= http.StatusInternalServerError, fmt.Errorf("ai service returned %d", resp.StatusCode)
 	}
 
+	if !utf8.Valid(payload) {
+		return Result{}, true, fmt.Errorf("invalid AI response: body must be valid UTF-8")
+	}
 	var decoded struct {
 		Result
 		DominantHz    *float64 `json:"dominant_hz"`

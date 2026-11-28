@@ -66,6 +66,33 @@ func TestDiagnoseSuccess(t *testing.T) {
 	}
 }
 
+func TestDiagnosePreservesValidUnicodeIdentities(t *testing.T) {
+	const identity = "电机-\ufffd-😀"
+	for _, escaped := range []bool{false, true} {
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			payload, err := json.Marshal(diagnose.Result{DeviceID: identity, EventID: identity, Fault: "normal"})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if escaped {
+				payload = bytes.ReplaceAll(payload, []byte(identity), []byte(`\u7535\u673a-\ufffd-\ud83d\ude00`))
+			}
+			_, _ = writer.Write(payload)
+		}))
+		result, err := diagnose.NewClient(server.URL).Diagnose(context.Background(), diagnose.Request{
+			DeviceID: identity, EventID: identity, Values: []float64{0},
+		})
+		server.Close()
+		if err != nil {
+			t.Fatalf("valid Unicode response (escaped=%v): %v", escaped, err)
+		}
+		if result.DeviceID != identity || result.EventID != identity || result.Fault != "normal" {
+			t.Fatalf("Unicode identity changed (escaped=%v): %+v", escaped, result)
+		}
+	}
+}
+
 func TestDiagnosePropagatesAIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
