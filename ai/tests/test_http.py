@@ -382,6 +382,7 @@ class HTTPTest(unittest.TestCase):
     def test_post_numeric_overflow_returns_json_error(self):
         maximum = float.fromhex("0x1.fffffffffffffp+1023")
         cases = (
+            ("/assess", [0.0, 0.0, 0.0, 1e308]),
             ("/spectrum", [maximum] * 512 + [-maximum] * 512),
         )
         for index, (path, values) in enumerate(cases):
@@ -436,6 +437,24 @@ class HTTPTest(unittest.TestCase):
         self.assertTrue(math.isfinite(payload["peak_amplitude"]))
         self.assertAlmostEqual(payload["peak_amplitude"] / 1e200, expected, delta=0.01)
         self.assertEqual(payload["fault"], "bearing_wear")
+
+    def test_post_assess_preserves_variance_with_extreme_spikes(self):
+        for spike in (1e300, -1e308):
+            with self.subTest(spike=spike):
+                values = [1e100, -1e100, 1e100, -1e100, spike]
+                request = urllib.request.Request(
+                    self.base + "/assess",
+                    data=json.dumps({"device_id": "motor-01", "values": values}, allow_nan=False).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    payload = json.load(response, parse_constant=lambda value: self.fail(value))
+                self.assertEqual(payload["device_id"], "motor-01")
+                self.assertEqual(payload["last"], spike)
+                self.assertEqual(payload["level"], "critical")
+                self.assertAlmostEqual(payload["z"] / (spike / 1e100), 1.0, places=12)
+                self.assertTrue(math.isfinite(payload["rms"]))
 
     def test_post_rejects_invalid_sample_types(self):
         invalid_values = [None, False, 0, "", {}, {"0": 0}]

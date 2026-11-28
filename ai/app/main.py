@@ -37,7 +37,7 @@ def zscore(value, history):
         return 0.0
     normalized_history = [item / scale for item in history]
     mean = math.fsum(normalized_history) / len(normalized_history)
-    sd = math.sqrt(math.fsum((item - mean) ** 2 for item in normalized_history) / len(normalized_history))
+    sd = math.hypot(*(item - mean for item in normalized_history)) / math.sqrt(len(normalized_history))
     delta = value / scale - mean
     if scale <= SD_FLOOR:
         return delta * (scale / SD_FLOOR)

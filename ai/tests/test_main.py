@@ -2,6 +2,7 @@ import os
 import math
 import sys
 import unittest
+from decimal import Decimal, localcontext
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
@@ -72,6 +73,26 @@ class AssessTest(unittest.TestCase):
                 actual = main.zscore(value, history)
                 self.assertTrue(math.isfinite(actual))
                 self.assertAlmostEqual(actual / expected if expected else actual, 1.0 if expected else 0.0, places=6)
+
+    def test_extreme_spikes_preserve_historical_variance(self):
+        for amplitude, spike in ((1.0, 1e200), (1e100, 1e300), (1e100, sys.float_info.max), (1e-8, 1e200)):
+            for sign in (-1, 1):
+                with self.subTest(amplitude=amplitude, spike=spike, sign=sign):
+                    history = [amplitude, -amplitude, amplitude]
+                    value = sign * spike
+                    with localcontext() as context:
+                        context.prec = 80
+                        numbers = [Decimal.from_float(item) for item in history]
+                        mean = sum(numbers) / len(numbers)
+                        deviation = (sum((item - mean) ** 2 for item in numbers) / len(numbers)).sqrt()
+                        expected = float((Decimal.from_float(value) - mean) / max(deviation, Decimal.from_float(main.SD_FLOOR)))
+                    actual = main.zscore(value, history)
+                    self.assertTrue(math.isfinite(actual))
+                    self.assertAlmostEqual(actual / expected, 1.0, places=12)
+                    result = main.assess("motor-01", "vibration_rms", history + [value])
+                    self.assertAlmostEqual(result["z"] / expected, 1.0, places=12)
+                    self.assertTrue(math.isfinite(result["rms"]))
+                    self.assertEqual(result["level"], "critical")
 
     def test_diagnose_rejects_non_numeric_frequencies(self):
         for field in ("sample_rate_hz", "rotation_hz"):
