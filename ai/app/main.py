@@ -314,10 +314,12 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         except OSError:
             pass
         finally:
-            self.shutdown_request(request)
-            self._rejection_slots.release()
-            with self._rejection_threads_lock:
-                self._rejection_threads.discard(threading.current_thread())
+            try:
+                self.shutdown_request(request)
+            finally:
+                self._rejection_slots.release()
+                with self._rejection_threads_lock:
+                    self._rejection_threads.discard(threading.current_thread())
 
     @staticmethod
     def _request_expects_continue(header):

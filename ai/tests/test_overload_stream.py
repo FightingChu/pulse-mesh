@@ -171,6 +171,47 @@ class OverloadStreamTest(unittest.TestCase):
                 self.assertTrue(retry.response.startswith(b'HTTP/1.1 503 '))
                 self.assertEqual(server._rejection_threads, set())
 
+    def test_rejection_socket_close_failure_releases_worker(self):
+        for header in (
+            b'GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n',
+            b'POST /assess HTTP/1.1\r\nContent-Length: invalid\r\n\r\n',
+            b'',
+        ):
+            with self.subTest(header=header):
+                server = main.BoundedThreadingHTTPServer(
+                    ('127.0.0.1', 0), main.H, max_workers=1, max_rejection_workers=1
+                )
+                self.addCleanup(server.server_close)
+                worker = main.threading.current_thread()
+                self.addCleanup(server._rejection_threads.discard, worker)
+                server._rejection_threads.add(worker)
+                self.assertTrue(server._rejection_slots.acquire(blocking=False))
+                client = ScriptedSocket([header])
+                failure = OSError('socket close failed')
+
+                def failed_close():
+                    client.closed = True
+                    raise failure
+
+                with patch.object(client, 'close', side_effect=failed_close):
+                    with self.assertRaises(OSError) as ctx:
+                        server._reject_overloaded_request(client)
+                self.assertIs(ctx.exception, failure)
+                self.assertTrue(client.closed)
+                self.assertNotIn(worker, server._rejection_threads)
+                self.assertTrue(server._rejection_slots.acquire(blocking=False))
+                self.assertFalse(server._rejection_slots.acquire(blocking=False))
+
+                server._rejection_threads.add(worker)
+                retry = ScriptedSocket([b'GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n'])
+                server._reject_overloaded_request(retry)
+                self.assertTrue(retry.closed)
+                self.assertTrue(retry.response.startswith(b'HTTP/1.1 503 '))
+                self.assertEqual(server._rejection_threads, set())
+                self.assertTrue(server._rejection_slots.acquire(blocking=False))
+                self.assertFalse(server._rejection_slots.acquire(blocking=False))
+                server._rejection_slots.release()
+
 
 if __name__ == '__main__':
     unittest.main()
